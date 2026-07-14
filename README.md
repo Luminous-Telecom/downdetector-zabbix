@@ -5,6 +5,24 @@ Coleta **logo, nome, status** (`success` / `warning` / `danger`) e a
 [downdetector.com.br](https://downdetector.com.br/), formatado em JSON para
 consumo pelo Zabbix.
 
+Este guia parte de um servidor **Debian 13 (trixie) limpo**, sem nada
+instalado, até o Zabbix monitorando os serviços. Se algum pacote já estiver
+instalado no seu servidor, o `apt install` correspondente simplesmente não
+faz nada (é seguro rodar de novo).
+
+## Índice
+
+1. [Como funciona](#como-funciona)
+2. [Pré-requisitos do sistema](#1-pré-requisitos-do-sistema)
+3. [Instalar o Docker](#2-instalar-o-docker)
+4. [Clonar o repositório](#3-clonar-o-repositório)
+5. [Instalar as dependências Python](#4-instalar-as-dependências-python)
+6. [Subir o FlareSolverr](#5-subir-o-flaresolverr)
+7. [Testar o script](#6-testar-o-script)
+8. [Instalar e configurar o Zabbix Agent](#7-instalar-e-configurar-o-zabbix-agent)
+9. [Criar o Template no Zabbix](#8-criar-o-template-no-zabbix)
+10. [Troubleshooting](#9-troubleshooting)
+
 ## Como funciona
 
 - A **home** do Downdetector lista todos os serviços com nome, logo e status,
@@ -21,26 +39,148 @@ consumo pelo Zabbix.
   (`requests`, `cloudscraper`, `curl_cffi`) geralmente retornam **403**. O
   script tenta essas alternativas primeiro e cai para o
   **[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr)** (um proxy
-  que resolve o desafio usando um Chrome real) quando elas falham.
+  que resolve o desafio usando um Chrome real dentro de um container Docker)
+  quando elas falham.
 
-## 1. Instalação
-
-### 1.1. Dependências Python
+## 1. Pré-requisitos do sistema
 
 ```bash
+apt update
+apt install -y \
+  git \
+  wget \
+  curl \
+  ca-certificates \
+  gnupg \
+  python3 \
+  python3-pip \
+  python3-venv
+```
+
+O que cada um faz aqui:
+- **git** — clonar este repositório
+- **wget** / **curl** — baixar coisas e testar endpoints (FlareSolverr, etc.)
+- **ca-certificates**, **gnupg** — necessários para adicionar o repositório
+  oficial do Docker com segurança (passo 2)
+- **python3**, **python3-pip** — rodar o script e instalar as bibliotecas
+- **python3-venv** — opcional, caso prefira isolar as dependências num
+  virtualenv em vez de instalar no sistema
+
+## 2. Instalar o Docker
+
+O FlareSolverr roda em um container Docker. Instalação oficial (Docker CE),
+recomendada pela própria Docker para Debian:
+
+```bash
+# Adiciona a chave GPG oficial do Docker
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+# Adiciona o repositório do Docker
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Confirme que instalou certo:
+
+```bash
+docker --version
+docker compose version
+```
+
+Ative o serviço (normalmente já vem ativo, mas garanta):
+
+```bash
+systemctl enable --now docker
+```
+
+> Alternativa mais simples (versão mais antiga, direto do repositório do
+> Debian, sem o `docker compose` v2): `apt install -y docker.io`. Se usar
+> essa opção, troque `docker compose` por `docker-compose` (com hífen) nos
+> comandos deste guia — mas recomendamos o método oficial acima.
+
+## 3. Clonar o repositório
+
+### 3.1. Configurar acesso SSH ao GitHub (se ainda não tiver)
+
+Se você já tem uma chave SSH cadastrada no GitHub em **outro** servidor, ela
+**não funciona automaticamente em um servidor novo** — cada servidor precisa
+da sua própria chave autorizada. É esse o erro:
+
+```
+git@github.com: Permission denied (publickey).
+```
+
+Gere uma chave nova neste servidor:
+
+```bash
+ssh-keygen -t ed25519 -C "$(hostname)" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copie a saída (começa com `ssh-ed25519 ...`) e adicione no GitHub. Duas
+opções:
+
+- **Deploy key (recomendado para servidores)**: no repositório
+  `Luminous-Telecom/downdetector-zabbix` → `Settings → Deploy keys → Add deploy key`
+  → cole a chave pública. Marque "Allow write access" só se este servidor
+  também vai dar `git push`.
+- **Chave da sua conta pessoal**: `github.com/settings/keys → New SSH key`
+  → cole a chave pública (dá acesso a todos os repositórios que sua conta
+  acessa).
+
+Teste antes de clonar:
+
+```bash
+ssh -T git@github.com
+```
+
+Deve responder algo como `Hi <usuário>! You've successfully authenticated...`.
+
+### 3.2. Clonar
+
+```bash
+cd ~
+git clone git@github.com:Luminous-Telecom/downdetector-zabbix.git
+cd downdetector-zabbix
+```
+
+> Alternativa sem SSH: clone via HTTPS com um
+> [personal access token](https://github.com/settings/tokens):
+> `git clone https://<token>@github.com/Luminous-Telecom/downdetector-zabbix.git`
+
+## 4. Instalar as dependências Python
+
+```bash
+cd ~/downdetector-zabbix
 pip install -r requirements.txt --break-system-packages
 ```
 
-(ou use um virtualenv, se preferir: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`)
+`--break-system-packages` é necessário em Debian 13 porque o Python do
+sistema bloqueia `pip install` fora de um virtualenv por padrão. Se preferir
+isolar num virtualenv:
 
-### 1.2. FlareSolverr (necessário — o Downdetector bloqueia acesso direto)
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# use .venv/bin/python3 no lugar de python3 nos comandos abaixo
+```
+
+## 5. Subir o FlareSolverr
 
 ```bash
 docker compose up -d
 ```
 
 Isso sobe o FlareSolverr em `http://localhost:8191/v1`, com
-`restart: unless-stopped` (sobrevive a reboot). Teste:
+`restart: unless-stopped` (sobrevive a reboot). Aguarde ~10s para o
+container inicializar e teste:
 
 ```bash
 curl -s http://localhost:8191/v1 -H 'Content-Type: application/json' \
@@ -48,11 +188,18 @@ curl -s http://localhost:8191/v1 -H 'Content-Type: application/json' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['solution']['status'])"
 ```
 
-Deve responder `200`. Se o FlareSolverr estiver em outra máquina/porta, aponte
-o script para ele com a variável de ambiente `FLARESOLVERR_URL` (padrão:
-`http://localhost:8191/v1`).
+Deve responder `200`. Se der erro de conexão, confira `docker ps` e
+`docker logs flaresolverr`.
 
-## 2. Uso do script
+Se o FlareSolverr estiver em outra máquina/porta, aponte o script para ele
+com a variável de ambiente `FLARESOLVERR_URL` (padrão:
+`http://localhost:8191/v1`):
+
+```bash
+export FLARESOLVERR_URL="http://outro-host:8191/v1"
+```
+
+## 6. Testar o script
 
 ```bash
 # Todos os serviços da home (rápido, ~5-10s; sem "reports")
@@ -98,16 +245,26 @@ Saída de `--service whatsapp --flat`:
 }
 ```
 
-## 3. Configurar no Zabbix
+Se tudo isso funcionou, pode seguir para configurar o Zabbix.
+
+## 7. Instalar e configurar o Zabbix Agent
 
 O agente precisa rodar **no mesmo servidor** onde estão o Python, o script e
 o FlareSolverr, já que o `UserParameter` chama tudo localmente.
 
-### 3.1. Instalar o Zabbix Agent 2
+### 7.1. Instalar
+
+Se este servidor já usa o repositório oficial do Zabbix, pule o `apt update`
+de repositório e vá direto no `apt install`. Caso contrário, o pacote
+`zabbix-agent2` já vem disponível direto pelos repositórios padrão do
+Debian 13:
 
 ```bash
+apt update
 apt install -y zabbix-agent2
 ```
+
+### 7.2. Configurar
 
 Edite `/etc/zabbix/zabbix_agent2.conf`:
 
@@ -118,16 +275,31 @@ Hostname=<nome do host cadastrado no Zabbix>
 Timeout=30
 ```
 
-### 3.2. Aplicar o UserParameter
+### 7.3. Aplicar o UserParameter
 
 ```bash
 mkdir -p /etc/zabbix/zabbix_agent2.d
-cp zabbix/downdetector.conf /etc/zabbix/zabbix_agent2.d/downdetector.conf
+cp ~/downdetector-zabbix/zabbix/downdetector.conf /etc/zabbix/zabbix_agent2.d/downdetector.conf
+```
+
+Abra o arquivo copiado e confirme que o caminho do script bate com onde você
+clonou o repositório (por padrão aponta para
+`/home/lucas/projetos/downdetector/downdetector_scraper.py` — ajuste para
+`~/downdetector-zabbix/downdetector_scraper.py` ou o caminho real deste
+servidor):
+
+```bash
+nano /etc/zabbix/zabbix_agent2.d/downdetector.conf
+```
+
+Reinicie e habilite o serviço:
+
+```bash
 systemctl restart zabbix-agent2
 systemctl enable zabbix-agent2
 ```
 
-Conteúdo de `zabbix/downdetector.conf`:
+Conteúdo esperado do `zabbix/downdetector.conf`:
 
 ```ini
 # Descoberta (LLD): lista todos os serviços da home (rápido, sem relatos).
@@ -138,23 +310,26 @@ UserParameter=downdetector.discovery,/usr/bin/python3 /caminho/downdetector_scra
 UserParameter=downdetector.status[*],/usr/bin/python3 /caminho/downdetector_scraper.py --service $1 --flat
 ```
 
-> Ajuste o caminho absoluto do script conforme onde ele estiver instalado.
-
-Teste antes de configurar no frontend:
+### 7.4. Testar
 
 ```bash
 zabbix_agent2 -t "downdetector.discovery"
 zabbix_agent2 -t "downdetector.status[whatsapp]"
 ```
 
-### 3.3. Criar o Host
+Se aparecer JSON válido nos dois casos, o agente está pronto. Se aparecer
+vazio ou erro, veja a seção de [Troubleshooting](#9-troubleshooting).
+
+## 8. Criar o Template no Zabbix
+
+### 8.1. Criar o Host
 
 `Data collection → Hosts → Create host`
 - **Host name**: o mesmo definido em `Hostname=` no agente
 - **Interfaces**: adicione o IP deste servidor (Agent, porta 10050)
 - **Templates**: adicione o template criado no passo seguinte
 
-### 3.4. Criar o Template com descoberta automática (LLD)
+### 8.2. Criar o Template com descoberta automática (LLD)
 
 `Data collection → Templates → Create template` → nome `Downdetector BR`.
 
@@ -214,8 +389,15 @@ Cloudflare por serviço** a cada ciclo — 4x mais lento e 4x mais chance de
 bloqueio. Com item mestre + dependentes, é **1 requisição por serviço**, e
 todos os campos são extraídos do mesmo JSON.
 
-## 4. Troubleshooting
+## 9. Troubleshooting
 
+- **`git@github.com: Permission denied (publickey)`** ao clonar em um
+  servidor novo: a chave SSH desse servidor não está cadastrada no GitHub.
+  Veja [3.1](#31-configurar-acesso-ssh-ao-github-se-ainda-não-tiver) —
+  gere uma chave com `ssh-keygen` e adicione como Deploy Key no repositório.
+- **`docker: command not found`**: o Docker não foi instalado ou o terminal
+  não recarregou o `PATH`. Rode `which docker`; se vazio, refaça o
+  [passo 2](#2-instalar-o-docker).
 - **`HTTP 403` / "página de desafio Cloudflare"**: o FlareSolverr não está
   rodando ou não está acessível. Confira `docker ps` e
   `curl http://localhost:8191/v1`.
@@ -226,6 +408,11 @@ todos os campos são extraídos do mesmo JSON.
 - **Muitos serviços descobertos e FlareSolverr sobrecarregado**: aumente o
   `Update interval` dos itens mestre (ex.: `10m` ou `15m`) — o status de um
   serviço não muda a cada poucos minutos na maioria dos casos.
+- **`ModuleNotFoundError` ao rodar o script**: as dependências Python não
+  foram instaladas para o usuário/interpretador que está executando. Refaça
+  o [passo 4](#4-instalar-as-dependências-python) — se usar virtualenv,
+  lembre de ajustar o caminho do Python no `UserParameter` (passo 7.3) para
+  `/caminho/.venv/bin/python3`.
 - **Quer testar sem depender do FlareSolverr**: use
   `--fetcher requests` ou `--fetcher curl_cffi` — funcionam se o Cloudflare
   não estiver desafiando aquele IP/sessão específico, mas não são
