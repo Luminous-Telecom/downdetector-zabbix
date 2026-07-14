@@ -145,20 +145,27 @@ Deve responder algo como `Hi <usuário>! You've successfully authenticated...`.
 
 ### 3.2. Clonar
 
+Clone sempre em **`/opt/downdetector-zabbix`** — esse caminho fixo é o que
+o `zabbix/downdetector.conf` já espera, então o `UserParameter` funciona em
+qualquer servidor sem precisar editar nada:
+
 ```bash
-cd ~
-git clone git@github.com:Luminous-Telecom/downdetector-zabbix.git
-cd downdetector-zabbix
+git clone git@github.com:Luminous-Telecom/downdetector-zabbix.git /opt/downdetector-zabbix
+cd /opt/downdetector-zabbix
 ```
 
 > Alternativa sem SSH: clone via HTTPS com um
 > [personal access token](https://github.com/settings/tokens):
-> `git clone https://<token>@github.com/Luminous-Telecom/downdetector-zabbix.git`
+> `git clone https://<token>@github.com/Luminous-Telecom/downdetector-zabbix.git /opt/downdetector-zabbix`
+
+> Se preferir clonar em outro lugar (ex.: `~/downdetector-zabbix`), tudo bem
+> — só ajuste os dois caminhos em `zabbix/downdetector.conf` antes de copiar
+> para `/etc/zabbix/zabbix_agent2.d/` (passo 7.3).
 
 ## 4. Instalar as dependências Python
 
 ```bash
-cd ~/downdetector-zabbix
+cd /opt/downdetector-zabbix
 pip install -r requirements.txt --break-system-packages
 ```
 
@@ -279,14 +286,13 @@ Timeout=30
 
 ```bash
 mkdir -p /etc/zabbix/zabbix_agent2.d
-cp ~/downdetector-zabbix/zabbix/downdetector.conf /etc/zabbix/zabbix_agent2.d/downdetector.conf
+cp /opt/downdetector-zabbix/zabbix/downdetector.conf /etc/zabbix/zabbix_agent2.d/downdetector.conf
 ```
 
-Abra o arquivo copiado e confirme que o caminho do script bate com onde você
-clonou o repositório (por padrão aponta para
-`/home/lucas/projetos/downdetector/downdetector_scraper.py` — ajuste para
-`~/downdetector-zabbix/downdetector_scraper.py` ou o caminho real deste
-servidor):
+Se você clonou o repositório em `/opt/downdetector-zabbix` (passo 3.2), o
+arquivo já vem com os caminhos certos, não precisa editar nada. Se clonou em
+outro lugar, abra o arquivo copiado e ajuste os dois caminhos antes de
+reiniciar o agente:
 
 ```bash
 nano /etc/zabbix/zabbix_agent2.d/downdetector.conf
