@@ -1,9 +1,0 @@
-# Serviços monitorados NESTE host (um por linha).
-# Formato: slug   ou   slug|Nome amigável
-# Slug = parte final da URL: https://downdetector.com.br/fora-do-ar/SLUG/
-#
-# Exemplos (descomente o que quiser):
-whatsapp|WhatsApp
-# nubank|Nubank
-# cloudflare|Cloudflare
-# steam|Steam

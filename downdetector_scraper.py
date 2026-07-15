@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Coleta serviços do Downdetector BR para o Zabbix.
+Coleta um serviço do Downdetector BR para o Zabbix.
 
-O host define o que monitorar em services.txt. O template descobre a lista
-(LLD) e coleta cada slug via agent.
+Modelo: cada *host* no Zabbix é um serviço (WhatsApp, Instagram, …).
+O template usa a macro {$DOWNDETECTOR.SLUG} nesse host.
 
-  python3 downdetector_scraper.py --lld
   python3 downdetector_scraper.py --service whatsapp --flat
 """
 
@@ -38,10 +37,6 @@ except ImportError:
 
 DEFAULT_FLARESOLVERR_URL = os.environ.get(
     "FLARESOLVERR_URL", "http://localhost:8191/v1"
-)
-DEFAULT_SERVICES_FILE = os.environ.get(
-    "DOWNDETECTOR_SERVICES_FILE",
-    "/opt/downdetector-zabbix/services.txt",
 )
 
 BASE_URL = "https://downdetector.com.br/"
@@ -299,62 +294,19 @@ def fetch_service(
     return parse_service_page(html, slug)
 
 
-def read_services_file(path: str) -> list[tuple[str, str]]:
-    """Lê a lista de serviços do host.
-
-    Formato (um por linha):
-      whatsapp
-      nubank|Nubank
-      # comentário
-    """
-    entries: list[tuple[str, str]] = []
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "|" in line:
-                slug, name = line.split("|", 1)
-            else:
-                slug, name = line, line
-            slug = slug.strip()
-            name = name.strip() or slug
-            validate_slug(slug)
-            entries.append((slug, name))
-    return entries
-
-
-def build_lld(entries: list[tuple[str, str]]) -> dict[str, Any]:
-    return {
-        "data": [
-            {"{#SLUG}": slug, "{#NAME}": name} for slug, name in entries
-        ]
-    }
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Coleta serviços do Downdetector BR para o Zabbix."
+        description="Coleta um serviço do Downdetector BR para o Zabbix."
     )
     parser.add_argument(
         "--service",
-        help="Slug do serviço (ex.: whatsapp). Obrigatório sem --lld.",
-    )
-    parser.add_argument(
-        "--lld",
-        action="store_true",
-        help="Imprime LLD JSON a partir do arquivo de serviços do host "
-        "(não acessa a internet).",
-    )
-    parser.add_argument(
-        "--services-file",
-        default=DEFAULT_SERVICES_FILE,
-        help=f"Lista de slugs do host (padrão: {DEFAULT_SERVICES_FILE}).",
+        required=True,
+        help="Slug do serviço (ex.: whatsapp, instagram, nubank).",
     )
     parser.add_argument(
         "--flat",
         action="store_true",
-        help="Mantido por compatibilidade com o UserParameter do agent.",
+        help="Mantido por compatibilidade com o UserParameter.",
     )
     parser.add_argument(
         "--numeric",
@@ -376,27 +328,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-
-    if args.lld:
-        try:
-            entries = read_services_file(args.services_file)
-        except FileNotFoundError:
-            print(
-                f"erro: arquivo de serviços não encontrado: {args.services_file}\n"
-                "Crie o arquivo (veja services.txt.example) com um slug por linha.",
-                file=sys.stderr,
-            )
-            return 1
-        except Exception as exc:
-            print(f"erro: {exc}", file=sys.stderr)
-            return 1
-        print(json.dumps(build_lld(entries), ensure_ascii=False, separators=(",", ":")))
-        return 0
-
-    if not args.service:
-        print("erro: use --service SLUG  ou  --lld", file=sys.stderr)
-        return 1
-
     try:
         service = fetch_service(
             args.service,

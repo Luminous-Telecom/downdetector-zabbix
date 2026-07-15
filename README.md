@@ -1,72 +1,64 @@
 # Downdetector BR → Zabbix
 
-**Template geral** no Zabbix. O **host** (agent) decide quais serviços
-coletar via arquivo local `services.txt` e executa o scrape.
+**Cada host no Zabbix = um serviço** (WhatsApp, Instagram, Nubank…).  
+O template é o mesmo; o host define o slug via macro.
 
 ```
-Template "Downdetector BR"
-        │  (vinculado ao host)
+Host "WhatsApp"     {$DOWNDETECTOR.SLUG}=whatsapp
+Host "Instagram"    {$DOWNDETECTOR.SLUG}=instagram
+        │
+        │  Agent interface → IP do coletor
         ▼
-Host zabbix-grafana (ou outro)
-  ├─ services.txt          → discovery (LLD)
-  └─ FlareSolverr + script → item downdetector.status[slug]
+Servidor coletor (FlareSolverr + script + zabbix-agent)
 ```
 
-## Instalação no host coletor
+## 1. Coletor (um servidor)
 
 ```bash
 cd /opt/downdetector-zabbix
 pip install -r requirements.txt --break-system-packages
 docker compose up -d
 
-cp services.txt.example services.txt
-nano services.txt          # só os slugs que este host deve monitorar
-
-# Agent: Timeout=30
+# Timeout=30 no zabbix_agentd.conf
 cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
 systemctl restart zabbix-agent
 
-zabbix_agentd -t downdetector.discovery
 zabbix_agentd -t "downdetector.status[whatsapp]"
 ```
 
-Exemplo de `services.txt`:
+## 2. Importar o template
 
-```
-whatsapp|WhatsApp
-nubank|Nubank
-cloudflare|Cloudflare
-```
+**Data collection → Templates → Import** →  
+`zabbix/template_downdetector_br.yaml`
 
-## Template no Zabbix Server
+## 3. Criar hosts (um por serviço)
 
-1. **Data collection → Templates → Import**
-2. Arquivo: `zabbix/template_downdetector_br.yaml`
-3. No host coletor: **Templates → Link** → `Downdetector BR`
-4. Interface Agent do host apontando para o IP onde o script/FlareSolverr rodam
-5. Aguarde a discovery (até 1h, ou **Execute now** na discovery rule)
+Exemplo WhatsApp:
 
-O template cria automaticamente (por slug da lista):
+| Campo | Valor |
+|---|---|
+| Host name | `WhatsApp` |
+| Interfaces | Agent → **IP do coletor** (porta 10050) |
+| Templates | `Downdetector BR` |
+| Macros | `{$DOWNDETECTOR.SLUG}` = `whatsapp` |
 
-| Item | Tipo | Notas |
-|---|---|---|
-| `downdetector.status[{#SLUG}]` | Agent (Text) | JSON; intervalo 15m |
-| `…status.code` | Dependent | 1/2/3/0 |
-| `…status.text` | Dependent | success/warning/danger |
-| `…reports` / `…baseline` | Dependent | relatos |
-| `…name` / `…logo` | Dependent | texto |
+Instagram: mesmo template, macro `instagram`.  
+Nubank: macro `nubank`.
+
+O slug é a URL: `https://downdetector.com.br/fora-do-ar/<slug>/`
+
+## Itens do template
+
+| Item | Tipo |
+|---|---|
+| Downdetector: raw | Agent (JSON, 15m) |
+| status code / status / relatos / baseline / nome / logo | Dependent |
 
 Triggers: warning se code=2, high se code=3.
 
-## Hosts diferentes, listas diferentes
-
-Cada host com o template pode ter seu próprio `services.txt`.
-Ex.: host A monitora ISPs; host B monitora bancos.
-
-> Poucos serviços por host. Cada `status[*]` leva ~5–20s (Cloudflare).
-
 ## Troubleshooting
 
-- **Discovery vazia**: falta `services.txt` ou path errado
-- **Timeout / network error**: `Timeout=30` no agent e no Server; menos itens
+- **Timeout**: `Timeout=30` no agent e no Server
+- **Unsupported item key**: conf no `zabbix_agentd.d/` + restart
 - **403**: FlareSolverr (`docker ps`, porta 8191)
+- **Macro errada**: slug tem que bater com a URL do Downdetector

@@ -8,154 +8,150 @@ zabbix_export:
       template: Downdetector BR
       name: Downdetector BR
       description: |
-        Monitora serviços do Downdetector BR via Zabbix Agent no host.
+        Um host Zabbix = um serviço (WhatsApp, Instagram, …).
 
-        O host define a lista em /opt/downdetector-zabbix/services.txt
-        (um slug por linha). A discovery lê só esse arquivo; a coleta
-        usa downdetector.status[slug] (FlareSolverr, timeout 30s).
+        No host, defina a macro:
+          {$DOWNDETECTOR.SLUG} = whatsapp
+        (slug da URL: downdetector.com.br/fora-do-ar/whatsapp/)
+
+        Interface Agent do host = IP do servidor coletor
+        (onde rodam o agent + FlareSolverr + este script).
 
         Códigos: 1=ok, 2=warning, 3=danger, 0=unknown.
       groups:
         - name: Templates/Applications
-      discovery_rules:
-        - uuid: a36155b9-80b9-4e28-86f2-5f3488fad43a
-          name: "Downdetector service discovery"
+      macros:
+        - macro: "{$DOWNDETECTOR.SLUG}"
+          value: whatsapp
+          description: "Slug do serviço no Downdetector (ex.: whatsapp, instagram)."
+      items:
+        - uuid: a18a8a5c-8874-4bf1-a5bf-ea272496eeac
+          name: "Downdetector: raw"
           type: ZABBIX_PASSIVE
-          key: downdetector.discovery
-          delay: 1h
-          description: "LLD a partir de services.txt no host do agent."
-          item_prototypes:
-            - uuid: a18a8a5c-8874-4bf1-a5bf-ea272496eeac
-              name: "Downdetector {#NAME}: raw"
-              type: ZABBIX_PASSIVE
-              key: "downdetector.status[{#SLUG}]"
-              delay: 15m
-              history: 7d
-              trends: "0"
-              value_type: TEXT
-              description: "JSON completo (status, relatos, logo, nome)."
-              tags:
-                - tag: Application
-                  value: Downdetector
-                - tag: Service
-                  value: "{#SLUG}"
-            - uuid: 588d15e6-7e5f-43e9-b7cc-e1e22225308c
-              name: "Downdetector {#NAME}: status code"
-              type: DEPENDENT
-              key: "downdetector.status.code[{#SLUG}]"
-              delay: "0"
-              history: 90d
-              trends: 365d
-              value_type: UINT
-              description: "1=ok 2=warning 3=danger 0=unknown"
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - $.status_code
-                  error_handler: DISCARD_VALUE
-              master_item:
-                key: "downdetector.status[{#SLUG}]"
-              tags:
-                - tag: Application
-                  value: Downdetector
-                - tag: Service
-                  value: "{#SLUG}"
-              trigger_prototypes:
-                - uuid: aa621e16-5ca7-4fc3-885e-94039b957bba
-                  expression: "last(/Downdetector BR/downdetector.status.code[{#SLUG}])=3"
-                  name: "Downdetector: {#NAME} reporta problemas"
-                  priority: HIGH
-                - uuid: 8e5bb217-eab3-44b5-be97-10ec3e6c97cb
-                  expression: "last(/Downdetector BR/downdetector.status.code[{#SLUG}])=2"
-                  name: "Downdetector: {#NAME} reporta possíveis problemas"
-                  priority: WARNING
-            - uuid: b2a13311-7d0c-40d8-ac29-20bc61ea510b
-              name: "Downdetector {#NAME}: status"
-              type: DEPENDENT
-              key: "downdetector.status.text[{#SLUG}]"
-              delay: "0"
-              history: 90d
-              trends: "0"
-              value_type: CHAR
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - $.status
-                  error_handler: DISCARD_VALUE
-              master_item:
-                key: "downdetector.status[{#SLUG}]"
-              tags:
-                - tag: Application
-                  value: Downdetector
-            - uuid: ab666efa-8d22-496e-a2f4-591891b084bc
-              name: "Downdetector {#NAME}: relatos"
-              type: DEPENDENT
-              key: "downdetector.reports[{#SLUG}]"
-              delay: "0"
-              history: 90d
-              trends: 365d
-              value_type: UINT
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - $.reports
-                  error_handler: DISCARD_VALUE
-              master_item:
-                key: "downdetector.status[{#SLUG}]"
-              tags:
-                - tag: Application
-                  value: Downdetector
-            - uuid: 61d3c1a4-6b19-4d0b-938e-6b91e562ddd0
-              name: "Downdetector {#NAME}: baseline"
-              type: DEPENDENT
-              key: "downdetector.reports.baseline[{#SLUG}]"
-              delay: "0"
-              history: 90d
-              trends: 365d
-              value_type: UINT
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - $.reports_baseline
-                  error_handler: DISCARD_VALUE
-              master_item:
-                key: "downdetector.status[{#SLUG}]"
-              tags:
-                - tag: Application
-                  value: Downdetector
-            - uuid: cb880387-1c50-42e4-af93-4210b0396f2a
-              name: "Downdetector {#NAME}: nome"
-              type: DEPENDENT
-              key: "downdetector.name[{#SLUG}]"
-              delay: "0"
-              history: 7d
-              trends: "0"
-              value_type: CHAR
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - $.name
-                  error_handler: DISCARD_VALUE
-              master_item:
-                key: "downdetector.status[{#SLUG}]"
-              tags:
-                - tag: Application
-                  value: Downdetector
-            - uuid: 91072fd3-dad8-4293-b7ce-1cbd004e6c46
-              name: "Downdetector {#NAME}: logo"
-              type: DEPENDENT
-              key: "downdetector.logo[{#SLUG}]"
-              delay: "0"
-              history: 7d
-              trends: "0"
-              value_type: TEXT
-              preprocessing:
-                - type: JSONPATH
-                  parameters:
-                    - $.logo
-                  error_handler: DISCARD_VALUE
-              master_item:
-                key: "downdetector.status[{#SLUG}]"
-              tags:
-                - tag: Application
-                  value: Downdetector
+          key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          delay: 15m
+          history: 7d
+          trends: "0"
+          value_type: TEXT
+          description: "JSON completo do serviço."
+          tags:
+            - tag: Application
+              value: Downdetector
+        - uuid: 588d15e6-7e5f-43e9-b7cc-e1e22225308c
+          name: "Downdetector: status code"
+          type: DEPENDENT
+          key: downdetector.status.code
+          delay: "0"
+          history: 90d
+          trends: 365d
+          value_type: UINT
+          description: "1=ok 2=warning 3=danger 0=unknown"
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.status_code
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          tags:
+            - tag: Application
+              value: Downdetector
+          triggers:
+            - uuid: aa621e16-5ca7-4fc3-885e-94039b957bba
+              expression: "last(/Downdetector BR/downdetector.status.code)=3"
+              name: "Downdetector: {HOST.NAME} reporta problemas"
+              priority: HIGH
+            - uuid: 8e5bb217-eab3-44b5-be97-10ec3e6c97cb
+              expression: "last(/Downdetector BR/downdetector.status.code)=2"
+              name: "Downdetector: {HOST.NAME} reporta possíveis problemas"
+              priority: WARNING
+        - uuid: b2a13311-7d0c-40d8-ac29-20bc61ea510b
+          name: "Downdetector: status"
+          type: DEPENDENT
+          key: downdetector.status.text
+          delay: "0"
+          history: 90d
+          trends: "0"
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.status
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          tags:
+            - tag: Application
+              value: Downdetector
+        - uuid: ab666efa-8d22-496e-a2f4-591891b084bc
+          name: "Downdetector: relatos"
+          type: DEPENDENT
+          key: downdetector.reports
+          delay: "0"
+          history: 90d
+          trends: 365d
+          value_type: UINT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.reports
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          tags:
+            - tag: Application
+              value: Downdetector
+        - uuid: 61d3c1a4-6b19-4d0b-938e-6b91e562ddd0
+          name: "Downdetector: baseline"
+          type: DEPENDENT
+          key: downdetector.reports.baseline
+          delay: "0"
+          history: 90d
+          trends: 365d
+          value_type: UINT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.reports_baseline
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          tags:
+            - tag: Application
+              value: Downdetector
+        - uuid: cb880387-1c50-42e4-af93-4210b0396f2a
+          name: "Downdetector: nome"
+          type: DEPENDENT
+          key: downdetector.name
+          delay: "0"
+          history: 7d
+          trends: "0"
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.name
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          tags:
+            - tag: Application
+              value: Downdetector
+        - uuid: 91072fd3-dad8-4293-b7ce-1cbd004e6c46
+          name: "Downdetector: logo"
+          type: DEPENDENT
+          key: downdetector.logo
+          delay: "0"
+          history: 7d
+          trends: "0"
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.logo
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          tags:
+            - tag: Application
+              value: Downdetector
