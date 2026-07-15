@@ -1,10 +1,10 @@
 zabbix_export:
   version: "7.0"
   template_groups:
-    - uuid: 66e96993-5e75-4ea5-97de-2f6cecd639e1
+    - uuid: 66e969935e754ea597de2f6cecd639e1
       name: downdetector
   templates:
-    - uuid: 1145b1a0-759f-47c5-a2fd-53670e5eed4e
+    - uuid: 1145b1a0759f47c5a2fd53670e5eed4e
       template: downdetector
       name: downdetector
       description: |
@@ -23,7 +23,7 @@ zabbix_export:
           value: whatsapp
           description: "Slug na URL: downdetector.com.br/fora-do-ar/<slug>/"
       items:
-        - uuid: 30bcc126-6597-496f-92f2-08b987fc46eb
+        - uuid: 30bcc1266597496f92f208b987fc46eb
           name: "Downdetector: raw"
           type: ZABBIX_PASSIVE
           key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
@@ -35,7 +35,7 @@ zabbix_export:
           tags:
             - tag: component
               value: raw
-        - uuid: 2081e48e-8577-4a10-ac8a-9d69c2619fab
+        - uuid: 2081e48e85774a10ac8a9d69c2619fab
           name: "Downdetector: status code"
           type: DEPENDENT
           key: downdetector.status.code
@@ -55,15 +55,15 @@ zabbix_export:
             - tag: component
               value: status
           triggers:
-            - uuid: f1fe698a-07f8-457f-8fbf-8d0114faad16
+            - uuid: f1fe698a07f8457f8fbf8d0114faad16
               expression: "last(/downdetector/downdetector.status.code)=3"
               name: "Downdetector: {HOST.NAME} reporta problemas"
               priority: HIGH
-            - uuid: 1aa5ef31-2230-4241-81ca-a65dedd4ac5e
+            - uuid: 1aa5ef312230424181caa65dedd4ac5e
               expression: "last(/downdetector/downdetector.status.code)=2"
               name: "Downdetector: {HOST.NAME} reporta possíveis problemas"
               priority: WARNING
-        - uuid: ada4ec94-62d8-4e84-aa31-442c285fd459
+        - uuid: ada4ec9462d84e84aa31442c285fd459
           name: "Downdetector: status"
           type: DEPENDENT
           key: downdetector.status.text
@@ -81,7 +81,7 @@ zabbix_export:
           tags:
             - tag: component
               value: status
-        - uuid: 059aa5f2-9ee5-43ed-bd9c-bccdb62d0c7e
+        - uuid: 059aa5f29ee543edbd9cbccdb62d0c7e
           name: "Downdetector: relatos"
           type: DEPENDENT
           key: downdetector.reports
@@ -99,7 +99,7 @@ zabbix_export:
           tags:
             - tag: component
               value: reports
-        - uuid: ea3d9df9-b7f3-4330-82ec-9fdd2bd4b731
+        - uuid: ea3d9df9b7f3433082ec9fdd2bd4b731
           name: "Downdetector: baseline"
           type: DEPENDENT
           key: downdetector.reports.baseline
@@ -117,7 +117,7 @@ zabbix_export:
           tags:
             - tag: component
               value: reports
-        - uuid: b176e6e7-16bd-4a0f-bf17-31776dbac8d6
+        - uuid: b176e6e716bd4a0fbf1731776dbac8d6
           name: "Downdetector: nome"
           type: DEPENDENT
           key: downdetector.name
@@ -135,7 +135,7 @@ zabbix_export:
           tags:
             - tag: component
               value: meta
-        - uuid: 5bb00179-1b6e-49f8-a845-59ca2e2aac49
+        - uuid: 5bb001791b6e49f8a84559ca2e2aac49
           name: "Downdetector: logo"
           type: DEPENDENT
           key: downdetector.logo
