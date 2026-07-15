@@ -399,6 +399,12 @@ def zabbix_api(
     token: str | None = None,
     auth: str | None = None,
 ) -> Any:
+    """Chamada JSON-RPC na API Zabbix.
+
+    Tokens de API vão no campo ``auth`` do body (mais confiável que Bearer:
+    proxies/PHP-FPM muitas vezes engolem o header Authorization e a API
+    responde "Session terminated").
+    """
     headers = {"Content-Type": "application/json-rpc"}
     payload: dict[str, Any] = {
         "jsonrpc": "2.0",
@@ -406,19 +412,23 @@ def zabbix_api(
         "params": params,
         "id": 1,
     }
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    elif auth:
-        payload["auth"] = auth
+
+    cred = (token or auth or "").strip()
+    if method != "user.login" and cred:
+        payload["auth"] = cred
 
     response = requests.post(url, json=payload, headers=headers, timeout=60)
     response.raise_for_status()
     data = response.json()
     if data.get("error"):
         err = data["error"]
-        raise RuntimeError(
-            f"Zabbix API {method}: {err.get('message')} — {err.get('data')}"
-        )
+        detail = f"{err.get('message')} — {err.get('data')}"
+        if "Session terminated" in detail or "Not authorized" in detail:
+            detail += (
+                " | Confira ZABBIX_TOKEN em /etc/zabbix/downdetector-api.env "
+                "(token ativo, sem aspas; URL correta api_jsonrpc.php)."
+            )
+        raise RuntimeError(f"Zabbix API {method}: {detail}")
     return data.get("result")
 
 
@@ -431,26 +441,56 @@ def discover_zabbix_slugs(
     template_name: str = "downdetector",
 ) -> list[str]:
     """Hosts ativos com o template downdetector (Host name = slug)."""
+    url = (url or "").strip()
+    token = (token or "").strip() or None
+    user = (user or "").strip() or None
+    password = (password or "").strip() or None
+
+    if not url:
+        raise RuntimeError("ZABBIX_URL vazio.")
+
+    placeholders = {
+        "",
+        "COLE_O_TOKEN_AQUI",
+        "cole_aqui_o_token_gerado_no_zabbix",
+        "changeme",
+        "YOUR_TOKEN",
+    }
+    if token in placeholders:
+        token = None
+
     auth: str | None = None
-    if not token:
+    if token:
+        auth_token = token
+    else:
         if not user or not password:
             raise RuntimeError(
-                "Configure ZABBIX_TOKEN (ou ZABBIX_USER + ZABBIX_PASSWORD)."
+                "Configure ZABBIX_TOKEN em /etc/zabbix/downdetector-api.env "
+                "(Users → API tokens no Zabbix web), "
+                "ou ZABBIX_USER + ZABBIX_PASSWORD."
             )
+        auth_token = None
         auth = zabbix_api(
             url,
             "user.login",
             {"username": user, "password": password},
         )
         if not isinstance(auth, str):
+            # Zabbix antigo usava "user" em vez de "username"
+            auth = zabbix_api(
+                url,
+                "user.login",
+                {"user": user, "password": password},
+            )
+        if not isinstance(auth, str):
             raise RuntimeError("Falha no user.login da API Zabbix.")
+        auth_token = auth
 
     templates = zabbix_api(
         url,
         "template.get",
         {"output": ["templateid", "host", "name"], "filter": {"host": [template_name]}},
-        token=token,
-        auth=auth,
+        token=auth_token,
     )
     if not templates:
         templates = zabbix_api(
@@ -460,8 +500,7 @@ def discover_zabbix_slugs(
                 "output": ["templateid", "host", "name"],
                 "filter": {"name": [template_name]},
             },
-            token=token,
-            auth=auth,
+            token=auth_token,
         )
     if not templates:
         raise RuntimeError(
@@ -476,8 +515,7 @@ def discover_zabbix_slugs(
             "templateids": [templates[0]["templateid"]],
             "filter": {"status": 0},
         },
-        token=token,
-        auth=auth,
+        token=auth_token,
     )
 
     slugs: list[str] = []
