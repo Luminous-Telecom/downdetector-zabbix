@@ -1,45 +1,35 @@
 zabbix_export:
   version: "7.0"
   template_groups:
-    - uuid: 66e969935e754ea597de2f6cecd639e1
+    - uuid: 43cadd75fa48481aa11d0139b63b8e02
       name: downdetector
   templates:
-    - uuid: 1145b1a0759f47c5a2fd53670e5eed4e
+    - uuid: 2b878aba6828435fabf8080789ecd43d
       template: downdetector
       name: downdetector
-      description: |
-        Um host Zabbix = um serviço (WhatsApp, Instagram, …).
-
-        No host, defina a macro:
-          {$DOWNDETECTOR.SLUG} = whatsapp
-
-        Interface Agent = IP do servidor coletor (agent + FlareSolverr).
-
-        Códigos: 1=ok, 2=warning, 3=danger, 0=unknown.
       groups:
         - name: downdetector
+      description: "Um host Zabbix = um serviço (WhatsApp, Instagram, …).\n\nNo host, defina a macro:\n  {$DOWNDETECTOR.SLUG} = whatsapp\n\nInterface Agent = IP do servidor coletor (agent + FlareSolverr).\n\nCódigos: 1=ok, 2=warning, 3=danger, 0=unknown."
       macros:
         - macro: "{$DOWNDETECTOR.SLUG}"
           value: whatsapp
           description: "Slug na URL: downdetector.com.br/fora-do-ar/<slug>/"
       items:
-        - uuid: 30bcc1266597496f92f208b987fc46eb
+        - uuid: a11b22c33d44e55f66778899aabb0001
           name: "Downdetector: raw"
           type: ZABBIX_PASSIVE
           key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
           delay: 15m
           history: 7d
-          trends: "0"
           value_type: TEXT
           description: "JSON completo do serviço."
           tags:
             - tag: component
               value: raw
-        - uuid: 2081e48e85774a10ac8a9d69c2619fab
+        - uuid: a11b22c33d44e55f66778899aabb0002
           name: "Downdetector: status code"
           type: DEPENDENT
           key: downdetector.status.code
-          delay: "0"
           history: 90d
           trends: 365d
           value_type: UNSIGNED
@@ -55,21 +45,19 @@ zabbix_export:
             - tag: component
               value: status
           triggers:
-            - uuid: f1fe698a07f8457f8fbf8d0114faad16
+            - uuid: a11b22c33d44e55f66778899aabb0008
               expression: "last(/downdetector/downdetector.status.code)=3"
               name: "Downdetector: {HOST.NAME} reporta problemas"
               priority: HIGH
-            - uuid: 1aa5ef312230424181caa65dedd4ac5e
+            - uuid: a11b22c33d44e55f66778899aabb0009
               expression: "last(/downdetector/downdetector.status.code)=2"
               name: "Downdetector: {HOST.NAME} reporta possíveis problemas"
               priority: WARNING
-        - uuid: ada4ec9462d84e84aa31442c285fd459
+        - uuid: a11b22c33d44e55f66778899aabb0003
           name: "Downdetector: status"
           type: DEPENDENT
           key: downdetector.status.text
-          delay: "0"
           history: 90d
-          trends: "0"
           value_type: CHAR
           preprocessing:
             - type: JSONPATH
@@ -81,11 +69,10 @@ zabbix_export:
           tags:
             - tag: component
               value: status
-        - uuid: 059aa5f29ee543edbd9cbccdb62d0c7e
+        - uuid: a11b22c33d44e55f66778899aabb0004
           name: "Downdetector: relatos"
           type: DEPENDENT
           key: downdetector.reports
-          delay: "0"
           history: 90d
           trends: 365d
           value_type: UNSIGNED
@@ -99,11 +86,10 @@ zabbix_export:
           tags:
             - tag: component
               value: reports
-        - uuid: ea3d9df9b7f3433082ec9fdd2bd4b731
+        - uuid: a11b22c33d44e55f66778899aabb0005
           name: "Downdetector: baseline"
           type: DEPENDENT
           key: downdetector.reports.baseline
-          delay: "0"
           history: 90d
           trends: 365d
           value_type: UNSIGNED
@@ -117,13 +103,11 @@ zabbix_export:
           tags:
             - tag: component
               value: reports
-        - uuid: b176e6e716bd4a0fbf1731776dbac8d6
+        - uuid: a11b22c33d44e55f66778899aabb0006
           name: "Downdetector: nome"
           type: DEPENDENT
           key: downdetector.name
-          delay: "0"
           history: 7d
-          trends: "0"
           value_type: CHAR
           preprocessing:
             - type: JSONPATH
@@ -135,13 +119,11 @@ zabbix_export:
           tags:
             - tag: component
               value: meta
-        - uuid: 5bb001791b6e49f8a84559ca2e2aac49
+        - uuid: a11b22c33d44e55f66778899aabb0007
           name: "Downdetector: logo"
           type: DEPENDENT
           key: downdetector.logo
-          delay: "0"
           history: 7d
-          trends: "0"
           value_type: TEXT
           preprocessing:
             - type: JSONPATH
