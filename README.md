@@ -1,14 +1,11 @@
 # Downdetector BR → Zabbix 7.0
 
-**Cada host = um serviço.** O slug é o **Host name** técnico (`{HOST.HOST}`).
-Sem macro.
+**Cada host = um serviço** (`Host name` = slug).  
+O **agent só lê cache** (ms). Um **timer systemd** atualiza o FlareSolverr em série.
 
 ```
-Host name: whatsapp      Visible name: WhatsApp
-Host name: instagram     Visible name: Instagram
-        │  Agent → IP do coletor
-        ▼
-Coletador (FlareSolverr + script + zabbix-agent)
+Timer (a cada 5 min) ──► FlareSolverr ──► /var/cache/.../slug.json
+Zabbix (N hosts)     ──► agent --from-cache ──► lê o JSON (sem Cloudflare)
 ```
 
 ## 1. Coletor
@@ -18,39 +15,45 @@ cd /opt/downdetector-zabbix
 pip install -r requirements.txt --break-system-packages
 docker compose up -d
 
-# Timeout=30 no agent (máximo do agentd clássico; 60 é rejeitado)
-cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
-mkdir -p /var/cache/downdetector-zabbix
-chown -R zabbix:zabbix /var/cache/downdetector-zabbix
-chmod 775 /var/cache/downdetector-zabbix
-systemctl restart zabbix-agent
+cp services.txt.example services.txt
+nano services.txt   # TODOS os Host name que você criou no Zabbix
 
-# 1ª chamada pode demorar (~FlareSolverr); seguintes <1s (cache 5 min)
-zabbix_agentd -t "downdetector.status[whatsapp]"
+mkdir -p /var/cache/downdetector-zabbix
+chown -R zabbix:zabbix /var/cache/downdetector-zabbix /opt/downdetector-zabbix/services.txt
+
+cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
+# Timeout=30 no agentd (máximo do clássico)
+
+cp systemd/downdetector-refresh.* /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now downdetector-refresh.timer
+systemctl start downdetector-refresh.service   # 1ª carga (pode demorar)
+
+systemctl restart zabbix-agent
+zabbix_agentd -t "downdetector.status[whatsapp]"   # deve ser instantâneo
 ```
 
-## 2. Template
+Acompanhe o refresh: `journalctl -u downdetector-refresh.service -f`
 
-**Data collection → Templates → Import** →  
-`zabbix/template_downdetector_br.yaml`
+## 2. Template + hosts
 
-## 3. Criar hosts
+Importe `zabbix/template_downdetector_br.yaml`.
 
 | Campo | Valor |
 |---|---|
-| Host name | `whatsapp` (slug da URL, minúsculo) |
-| Visible name | `WhatsApp` (opcional, só exibição) |
-| Interfaces | Agent → IP do coletor :10050 |
+| Host name | slug (`caixa`, `banco-inter`, `whatsapp`) |
+| Visible name | nome amigável |
+| Agent | IP do coletor :10050 |
 | Templates | `downdetector` |
 
-URL: `https://downdetector.com.br/fora-do-ar/<Host name>/`
+**Todo host novo:** acrescente o slug em `services.txt` e rode  
+`systemctl start downdetector-refresh.service` (ou espere o timer).
 
 ## Troubleshooting
 
-- **Permission denied** em `/var/cache/downdetector-zabbix`:
-  `chown -R zabbix:zabbix /var/cache/downdetector-zabbix`
-- **Timeout**: agentd clássico aceita no máximo **30** (60 é rejeitado e o agent não sobe)
-- **read timeout / ZBX vermelho**: use cache (`--cache-ttl 300` no conf) e item raw = 5m
-- **Unsupported item key**: conf no agentd.d + restart
-- **403**: FlareSolverr na porta 8191
-- **Item não acha serviço**: Host name tem que ser o slug (`whatsapp`, não `WhatsApp`)
+- **Agent cai / ZBX vermelho com muitos hosts**: confira se o UserParameter
+  tem `--from-cache` (não `--cache-ttl`). O timer faz o scrape.
+- **cache ausente**: slug faltando em `services.txt` ou refresh ainda não rodou
+- **Permission denied**: `chown -R zabbix:zabbix /var/cache/downdetector-zabbix`
+- **Timeout=60 rejeitado**: agentd clássico máximo é **30**
+- **403**: FlareSolverr (`docker ps`, porta 8191)

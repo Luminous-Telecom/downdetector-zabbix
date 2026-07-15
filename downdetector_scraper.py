@@ -44,7 +44,10 @@ DEFAULT_CACHE_DIR = os.environ.get(
     "DOWNDETECTOR_CACHE_DIR", "/var/cache/downdetector-zabbix"
 )
 DEFAULT_CACHE_TTL = int(os.environ.get("DOWNDETECTOR_CACHE_TTL", "300"))
-
+DEFAULT_SERVICES_FILE = os.environ.get(
+    "DOWNDETECTOR_SERVICES_FILE",
+    "/opt/downdetector-zabbix/services.txt",
+)
 BASE_URL = "https://downdetector.com.br/"
 SERVICE_URL_TEMPLATE = BASE_URL + "fora-do-ar/{slug}/"
 SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,80}$")

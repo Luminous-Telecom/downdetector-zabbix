@@ -1,0 +1,15 @@
+# Um slug por linha = Host name técnico no Zabbix.
+# O timer lê este arquivo e atualiza o cache em série.
+# Formato: slug   ou   slug|Nome (o nome é só comentário)
+
+whatsapp
+instagram
+caixa
+banco-inter
+nubank
+banco-itau
+banco-do-brasil
+bradesco
+santander
+# cloudflare
+# mercado-livre

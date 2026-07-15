@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh Downdetector BR cache (serial FlareSolverr)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=zabbix
+Group=zabbix
+Nice=10
+# Um scrape por vez — não compete com o agent
+ExecStart=/usr/bin/python3 /opt/downdetector-zabbix/downdetector_scraper.py --refresh-all --delay 1.5
+TimeoutStartSec=7200
