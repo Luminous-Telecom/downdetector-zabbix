@@ -15,7 +15,7 @@ zabbix_export:
           name: "Downdetector: raw"
           type: ZABBIX_PASSIVE
           key: "downdetector.status[{HOST.HOST}]"
-          delay: 15m
+          delay: 10m
           history: 7d
           value_type: TEXT
           description: "JSON completo. Slug = Host name técnico."

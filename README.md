@@ -25,7 +25,7 @@ chown -R zabbix:zabbix /var/cache/downdetector-zabbix
 chmod 775 /var/cache/downdetector-zabbix
 systemctl restart zabbix-agent
 
-# 1ª chamada pode demorar (~FlareSolverr); seguintes <1s (cache 15 min)
+# 1ª chamada pode demorar (~FlareSolverr); seguintes <1s (cache 10 min)
 zabbix_agentd -t "downdetector.status[whatsapp]"
 ```
 
@@ -50,7 +50,7 @@ URL: `https://downdetector.com.br/fora-do-ar/<Host name>/`
 - **Permission denied** em `/var/cache/downdetector-zabbix`:
   `chown -R zabbix:zabbix /var/cache/downdetector-zabbix`
 - **Timeout**: agentd clássico aceita no máximo **30** (60 é rejeitado e o agent não sobe)
-- **read timeout / ZBX vermelho**: use cache (`--cache-ttl 900` no conf) e item raw ≥ 15m
+- **read timeout / ZBX vermelho**: use cache (`--cache-ttl 600` no conf) e item raw = 10m
 - **Unsupported item key**: conf no agentd.d + restart
 - **403**: FlareSolverr na porta 8191
 - **Item não acha serviço**: Host name tem que ser o slug (`whatsapp`, não `WhatsApp`)

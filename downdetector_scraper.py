@@ -43,7 +43,7 @@ DEFAULT_FLARESOLVERR_URL = os.environ.get(
 DEFAULT_CACHE_DIR = os.environ.get(
     "DOWNDETECTOR_CACHE_DIR", "/var/cache/downdetector-zabbix"
 )
-DEFAULT_CACHE_TTL = int(os.environ.get("DOWNDETECTOR_CACHE_TTL", "900"))
+DEFAULT_CACHE_TTL = int(os.environ.get("DOWNDETECTOR_CACHE_TTL", "600"))
 
 BASE_URL = "https://downdetector.com.br/"
 SERVICE_URL_TEMPLATE = BASE_URL + "fora-do-ar/{slug}/"
@@ -406,7 +406,7 @@ def parse_args() -> argparse.Namespace:
         "--cache-ttl",
         type=int,
         default=DEFAULT_CACHE_TTL,
-        help="Segundos para reutilizar o JSON em disco (padrão: 900). "
+        help="Segundos para reutilizar o JSON em disco (padrão: 600 = 10 min). "
         "0 = sempre coletar ao vivo. Necessário porque o agent clássico "
         "limita Timeout a 30s e o FlareSolverr costuma passar disso.",
     )
