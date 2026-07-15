@@ -1,6 +1,6 @@
 zabbix_export:
   version: "6.0"
-  template_groups:
+  groups:
     - uuid: da635868-7771-4c66-ac8d-ef9c78030dec
       name: Templates/Applications
   templates:
