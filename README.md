@@ -46,7 +46,8 @@ URL: `https://downdetector.com.br/fora-do-ar/<Host name>/`
 
 ## Troubleshooting
 
-- **Timeout**: `Timeout=30` no agent e no Server
+- **Timeout**: agentd clássico aceita no máximo **30** (60 é rejeitado e o agent não sobe)
+- **read timeout / ZBX vermelho**: use cache (`--cache-ttl 900` no conf) e item raw ≥ 15m
 - **Unsupported item key**: conf no agentd.d + restart
 - **403**: FlareSolverr na porta 8191
 - **Item não acha serviço**: Host name tem que ser o slug (`whatsapp`, não `WhatsApp`)
