@@ -2,10 +2,11 @@
 """
 Coleta um serviço do Downdetector BR para o Zabbix.
 
-Modelo: cada *host* no Zabbix é um serviço (WhatsApp, Instagram, …).
-O template usa a macro {$DOWNDETECTOR.SLUG} nesse host.
+Cada host Zabbix = um serviço (Host name = slug).
+Agent: --from-cache (só lê disco). Timer: --refresh-all (FlareSolverr).
 
-  python3 downdetector_scraper.py --service whatsapp --flat
+  python3 downdetector_scraper.py --service whatsapp --from-cache --flat
+  python3 downdetector_scraper.py --refresh-all
 """
 
 from __future__ import annotations
@@ -337,11 +338,7 @@ def get_service_cached(
     fetcher: str = "auto",
     flaresolverr_url: str = DEFAULT_FLARESOLVERR_URL,
 ) -> dict[str, Any]:
-    """Lê cache se fresco; senão atualiza via FlareSolverr (com lock por slug).
-
-    Assim o agent responde em ms na maior parte do tempo (Timeout máx. 30s
-    no zabbix_agentd clássico). Vários hosts paralelos não disparam N scrapes.
-    """
+    """Lê cache se fresco; senão atualiza via FlareSolverr (com lock por slug)."""
     slug = validate_slug(slug)
     path = cache_path(cache_dir, slug)
     lock_path = path + ".lock"
@@ -364,11 +361,106 @@ def get_service_cached(
                 return payload
             except Exception:
                 if os.path.isfile(path):
-                    # Cache velho melhor que timeout no Zabbix
                     return read_cache_file(path)
                 raise
         finally:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
+def read_from_cache(cache_dir: str, slug: str) -> dict[str, Any]:
+    """Só lê disco — nunca chama FlareSolverr (modo Zabbix Agent)."""
+    slug = validate_slug(slug)
+    path = cache_path(cache_dir, slug)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"cache ausente para {slug!r} ({path}). "
+            "Inclua o slug em services.txt e rode "
+            "systemctl start downdetector-refresh.service"
+        )
+    return read_cache_file(path)
+
+
+def read_services_file(path: str) -> list[str]:
+    if not os.path.isfile(path):
+        return []
+    slugs: list[str] = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            slug = line.split("|", 1)[0].strip()
+            validate_slug(slug)
+            if slug not in slugs:
+                slugs.append(slug)
+    return slugs
+
+
+def discover_cached_slugs(cache_dir: str) -> list[str]:
+    if not os.path.isdir(cache_dir):
+        return []
+    slugs: list[str] = []
+    for name in sorted(os.listdir(cache_dir)):
+        if not name.endswith(".json"):
+            continue
+        if name in ("lld.json",) or name.endswith(".tmp"):
+            continue
+        slug = name[: -len(".json")]
+        if SLUG_RE.match(slug) and slug not in slugs:
+            slugs.append(slug)
+    return slugs
+
+
+def refresh_all(
+    *,
+    cache_dir: str,
+    services_file: str,
+    fetcher: str,
+    flaresolverr_url: str,
+    delay: float,
+) -> int:
+    """Atualiza caches em série (timer systemd). Agent só lê o resultado."""
+    ordered: list[str] = []
+    for slug in read_services_file(services_file) + discover_cached_slugs(cache_dir):
+        if slug not in ordered:
+            ordered.append(slug)
+
+    if not ordered:
+        print(
+            f"Nenhum slug em {services_file} nem em {cache_dir}. "
+            "Liste um slug por linha em services.txt.",
+            file=sys.stderr,
+        )
+        return 1
+
+    ok = 0
+    fail = 0
+    total = len(ordered)
+    for i, slug in enumerate(ordered, start=1):
+        try:
+            service = fetch_service(
+                slug, fetcher=fetcher, flaresolverr_url=flaresolverr_url
+            )
+            write_cache_file(cache_path(cache_dir, slug), asdict(service))
+            ok += 1
+            print(
+                f"[{i}/{total}] {slug}: {service.status} reports={service.reports}",
+                file=sys.stderr,
+                flush=True,
+            )
+        except Exception as exc:
+            fail += 1
+            print(f"[{i}/{total}] {slug}: ERRO {exc}", file=sys.stderr, flush=True)
+        if delay > 0 and i < total:
+            time.sleep(delay)
+
+    print(
+        json.dumps(
+            {"updated": ok, "failed": fail, "total": total, "cache_dir": cache_dir},
+            ensure_ascii=False,
+        )
+    )
+    return 0 if ok else 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -377,8 +469,29 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--service",
-        required=True,
-        help="Slug do serviço (ex.: whatsapp, instagram, nubank).",
+        help="Slug do serviço (ex.: whatsapp, caixa, banco-inter).",
+    )
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Só lê o cache em disco (modo Agent). Nunca chama FlareSolverr.",
+    )
+    parser.add_argument(
+        "--refresh-all",
+        action="store_true",
+        help="Atualiza em série todos os slugs de services.txt + cache. "
+        "Use no systemd timer — NÃO no UserParameter.",
+    )
+    parser.add_argument(
+        "--services-file",
+        default=DEFAULT_SERVICES_FILE,
+        help=f"Lista de slugs (padrão: {DEFAULT_SERVICES_FILE}).",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Pausa entre scrapes no --refresh-all (padrão: 1s).",
     )
     parser.add_argument(
         "--flat",
@@ -409,17 +522,32 @@ def parse_args() -> argparse.Namespace:
         "--cache-ttl",
         type=int,
         default=DEFAULT_CACHE_TTL,
-        help="Segundos para reutilizar o JSON em disco (padrão: 300 = 5 min). "
-        "0 = sempre coletar ao vivo. Necessário porque o agent clássico "
-        "limita Timeout a 30s e o FlareSolverr costuma passar disso.",
+        help="Com --service sem --from-cache: reutiliza disco se fresco "
+        "(padrão: 300). 0 = sempre ao vivo.",
     )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+
+    if args.refresh_all:
+        return refresh_all(
+            cache_dir=args.cache_dir,
+            services_file=args.services_file,
+            fetcher=args.fetcher,
+            flaresolverr_url=args.flaresolverr_url,
+            delay=args.delay,
+        )
+
+    if not args.service:
+        print("erro: use --service SLUG  ou  --refresh-all", file=sys.stderr)
+        return 1
+
     try:
-        if args.cache_ttl > 0:
+        if args.from_cache:
+            payload = read_from_cache(args.cache_dir, args.service)
+        elif args.cache_ttl > 0:
             payload = get_service_cached(
                 args.service,
                 cache_dir=args.cache_dir,
