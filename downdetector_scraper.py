@@ -11,10 +11,12 @@ O template usa a macro {$DOWNDETECTOR.SLUG} nesse host.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
 import sys
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -38,6 +40,10 @@ except ImportError:
 DEFAULT_FLARESOLVERR_URL = os.environ.get(
     "FLARESOLVERR_URL", "http://localhost:8191/v1"
 )
+DEFAULT_CACHE_DIR = os.environ.get(
+    "DOWNDETECTOR_CACHE_DIR", "/var/cache/downdetector-zabbix"
+)
+DEFAULT_CACHE_TTL = int(os.environ.get("DOWNDETECTOR_CACHE_TTL", "900"))
 
 BASE_URL = "https://downdetector.com.br/"
 SERVICE_URL_TEMPLATE = BASE_URL + "fora-do-ar/{slug}/"
@@ -294,6 +300,74 @@ def fetch_service(
     return parse_service_page(html, slug)
 
 
+def cache_path(cache_dir: str, slug: str) -> str:
+    return os.path.join(cache_dir, f"{slug}.json")
+
+
+def read_cache_file(path: str) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def write_cache_file(path: str, payload: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+
+
+def cache_is_fresh(path: str, ttl: int) -> bool:
+    if ttl <= 0 or not os.path.isfile(path):
+        return False
+    age = time.time() - os.path.getmtime(path)
+    return age < ttl
+
+
+def get_service_cached(
+    slug: str,
+    *,
+    cache_dir: str,
+    ttl: int,
+    fetcher: str = "auto",
+    flaresolverr_url: str = DEFAULT_FLARESOLVERR_URL,
+) -> dict[str, Any]:
+    """Lê cache se fresco; senão atualiza via FlareSolverr (com lock por slug).
+
+    Assim o agent responde em ms na maior parte do tempo (Timeout máx. 30s
+    no zabbix_agentd clássico). Vários hosts paralelos não disparam N scrapes.
+    """
+    slug = validate_slug(slug)
+    path = cache_path(cache_dir, slug)
+    lock_path = path + ".lock"
+
+    if cache_is_fresh(path, ttl):
+        return read_cache_file(path)
+
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(lock_path, "w", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            if cache_is_fresh(path, ttl):
+                return read_cache_file(path)
+            try:
+                service = fetch_service(
+                    slug, fetcher=fetcher, flaresolverr_url=flaresolverr_url
+                )
+                payload = asdict(service)
+                write_cache_file(path, payload)
+                return payload
+            except Exception:
+                if os.path.isfile(path):
+                    # Cache velho melhor que timeout no Zabbix
+                    return read_cache_file(path)
+                raise
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Coleta um serviço do Downdetector BR para o Zabbix."
@@ -323,28 +397,52 @@ def parse_args() -> argparse.Namespace:
         "--flaresolverr-url",
         default=DEFAULT_FLARESOLVERR_URL,
     )
+    parser.add_argument(
+        "--cache-dir",
+        default=DEFAULT_CACHE_DIR,
+        help=f"Diretório de cache por slug (padrão: {DEFAULT_CACHE_DIR}).",
+    )
+    parser.add_argument(
+        "--cache-ttl",
+        type=int,
+        default=DEFAULT_CACHE_TTL,
+        help="Segundos para reutilizar o JSON em disco (padrão: 900). "
+        "0 = sempre coletar ao vivo. Necessário porque o agent clássico "
+        "limita Timeout a 30s e o FlareSolverr costuma passar disso.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        service = fetch_service(
-            args.service,
-            fetcher=args.fetcher,
-            flaresolverr_url=args.flaresolverr_url,
-        )
+        if args.cache_ttl > 0:
+            payload = get_service_cached(
+                args.service,
+                cache_dir=args.cache_dir,
+                ttl=args.cache_ttl,
+                fetcher=args.fetcher,
+                flaresolverr_url=args.flaresolverr_url,
+            )
+        else:
+            payload = asdict(
+                fetch_service(
+                    args.service,
+                    fetcher=args.fetcher,
+                    flaresolverr_url=args.flaresolverr_url,
+                )
+            )
     except Exception as exc:
         print(f"erro: {exc}", file=sys.stderr)
         return 1
 
     if args.numeric:
-        print(service.status_code)
+        print(payload.get("status_code", 0))
         return 0
 
     print(
         json.dumps(
-            asdict(service),
+            payload,
             ensure_ascii=False,
             indent=2 if args.pretty else None,
             separators=None if args.pretty else (",", ":"),

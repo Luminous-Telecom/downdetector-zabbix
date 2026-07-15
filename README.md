@@ -18,10 +18,13 @@ cd /opt/downdetector-zabbix
 pip install -r requirements.txt --break-system-packages
 docker compose up -d
 
-# Timeout=30 no agent
+# Timeout=30 no agent (máximo do agentd clássico; 60 é rejeitado)
 cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
+mkdir -p /var/cache/downdetector-zabbix
+chmod 755 /var/cache/downdetector-zabbix
 systemctl restart zabbix-agent
 
+# 1ª chamada pode demorar (~FlareSolverr); seguintes <1s (cache 15 min)
 zabbix_agentd -t "downdetector.status[whatsapp]"
 ```
 
