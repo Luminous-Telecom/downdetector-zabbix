@@ -1,0 +1,16 @@
+#!/bin/bash
+# External check do Zabbix Server — chamado a cada intervalo do item.
+# Uso no template: downdetector[{HOST.HOST}]
+# $1 = Host name técnico (slug), ex.: whatsapp, caixa, banco-inter
+#
+# Só lê cache (ms). Quem atualiza o Cloudflare é o timer
+# downdetector-refresh.service (lista hosts pela API).
+
+set -euo pipefail
+SLUG="${1:-}"
+if [[ -z "$SLUG" ]]; then
+  echo "erro: slug vazio" >&2
+  exit 1
+fi
+exec /usr/bin/python3 /opt/downdetector-zabbix/downdetector_scraper.py \
+  --service "$SLUG" --flat --from-cache

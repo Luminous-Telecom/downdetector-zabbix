@@ -1,48 +1,52 @@
 # Downdetector BR → Zabbix 7.0
 
-**Cadastro só no Zabbix web.** Cada host = um serviço (`Host name` = slug).
+**Sem Zabbix Agent.** Cadastro só na web.  
+Cada host dispara um **External check** a cada 5 min; o Server roda o script.
 
 ```
-Zabbix web (hosts + template)
+Zabbix web: host "caixa" + template downdetector
         │
+        │  External check a cada 5m: downdetector[caixa]
         ▼
-Timer ──API──► lista Host names ──► FlareSolverr (1 a 1) ──► cache/
-Agent ───────────────────────────────────────────────────► lê cache (ms)
+Zabbix Server ──► /usr/lib/zabbix/externalscripts/downdetector
+                └─► lê /var/cache/.../caixa.json  (ms)
+
+Timer (5 min) ──API──► hosts do template ──► FlareSolverr (1 a 1) ──► cache/
 ```
 
-## 1. Coletor
+## 1. Coletor / Server (mesmo servidor)
 
 ```bash
 cd /opt/downdetector-zabbix
+git pull
 pip install -r requirements.txt --break-system-packages
 docker compose up -d
 
 mkdir -p /var/cache/downdetector-zabbix
 chown -R zabbix:zabbix /var/cache/downdetector-zabbix
 
-# Timeout=30 no agentd (máximo do clássico)
-cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
-systemctl restart zabbix-agent
+# Script do External check (path padrão Debian/Ubuntu)
+cp zabbix/externalscripts/downdetector /usr/lib/zabbix/externalscripts/downdetector
+chmod 755 /usr/lib/zabbix/externalscripts/downdetector
+# confira: grep ^ExternalScripts /etc/zabbix/zabbix_server.conf
 ```
 
-## 2. API token (para o timer achar os hosts)
-
-No Zabbix: **Users → API tokens → Create** (usuário com permissão de ler hosts).
+Teste manual:
 
 ```bash
-cp /opt/downdetector-zabbix/zabbix/downdetector-api.env.example \
-   /etc/zabbix/downdetector-api.env
-nano /etc/zabbix/downdetector-api.env   # só URL + TOKEN (uma vez)
+/usr/lib/zabbix/externalscripts/downdetector whatsapp
+```
+
+## 2. API token (timer descobre os hosts)
+
+**Users → API tokens → Create**
+
+```bash
+cp zabbix/downdetector-api.env.example /etc/zabbix/downdetector-api.env
+# edite ZABBIX_URL + ZABBIX_TOKEN (sem aspas)
 chmod 640 /etc/zabbix/downdetector-api.env
 chown root:zabbix /etc/zabbix/downdetector-api.env
-```
 
-URL típica: `http://127.0.0.1/api_jsonrpc.php`  
-(ou `http://127.0.0.1/zabbix/api_jsonrpc.php`)
-
-## 3. Timer de atualização
-
-```bash
 cp systemd/downdetector-refresh.* /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now downdetector-refresh.timer
@@ -50,27 +54,23 @@ systemctl start downdetector-refresh.service
 journalctl -u downdetector-refresh.service -f
 ```
 
-## 4. Template + hosts (só na web)
+## 3. Template + hosts (só na web)
 
-Importe `zabbix/template_downdetector_br.yaml`.
-
-Para cada serviço:
+Importe de novo: `zabbix/template_downdetector_br.yaml`  
+(item mestre = **External check** `downdetector[{HOST.HOST}]`).
 
 | Campo | Valor |
 |---|---|
-| Host name | slug (`caixa`, `banco-inter`, `whatsapp`) |
+| Host name | slug (`caixa`, `whatsapp`, `banco-inter`) |
 | Visible name | Caixa Econômica Federal, etc. |
-| Agent | `127.0.0.1:10050` (coletor) |
+| Interfaces | pode ser Agent `127.0.0.1` (não precisa agent rodando) |
 | Templates | `downdetector` |
 
-Pronto — **não precisa editar lista de serviços no servidor**.  
-Host novo na web → no próximo ciclo do timer (5 min) o cache é criado.  
-Forçar agora: `systemctl start downdetector-refresh.service`
+Não precisa UserParameter / agent. O ZBX pode ficar cinza — o que importa é o item External.
 
 ## Troubleshooting
 
-- **cache ausente**: host novo ainda não passou pelo timer; rode o service acima
-- **API token / template não encontrado**: confira `/etc/zabbix/downdetector-api.env`
-- **Permission denied** no cache: `chown -R zabbix:zabbix /var/cache/downdetector-zabbix`
-- **Timeout=60 rejeitado**: agentd máximo é **30**
-- **403**: FlareSolverr (`docker ps`)
+- **Unsupported item key / empty**: script não está em `ExternalScripts` ou sem `chmod +x`
+- **cache ausente**: rode `systemctl start downdetector-refresh.service`
+- **Session terminated** na API: token/URL em `/etc/zabbix/downdetector-api.env`
+- **Timeout no External**: Timeout do Server ≥ 10s (leitura de cache é rápida)
