@@ -1,0 +1,12 @@
+[Unit]
+Description=Update Downdetector BR local cache (FlareSolverr)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+# Evita duas coletas em paralelo
+ExecStart=/usr/bin/python3 /opt/downdetector-zabbix/downdetector_scraper.py --update-cache --delay 1.0
+# Pode demorar vários minutos na primeira execução
+TimeoutStartSec=3600

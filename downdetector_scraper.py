@@ -59,9 +59,13 @@ except ImportError:
 DEFAULT_FLARESOLVERR_URL = os.environ.get(
     "FLARESOLVERR_URL", "http://localhost:8191/v1"
 )
+DEFAULT_CACHE_DIR = os.environ.get(
+    "DOWNDETECTOR_CACHE_DIR", "/var/cache/downdetector-zabbix"
+)
 
 BASE_URL = "https://downdetector.com.br/"
 SERVICE_URL_TEMPLATE = BASE_URL + "fora-do-ar/{slug}/"
+SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,80}$")
 
 # Ordem importa: "sem problemas" precisa ser checado antes de "problemas".
 STATUS_FROM_TEXT = [
@@ -530,6 +534,96 @@ def filter_payload(payload: dict[str, Any], statuses: set[str]) -> dict[str, Any
     }
 
 
+def validate_slug(slug: str) -> str:
+    if not SLUG_RE.match(slug):
+        raise ValueError(f"slug inválido: {slug!r}")
+    return slug
+
+
+def cache_paths(cache_dir: str) -> tuple[str, str]:
+    return (
+        os.path.join(cache_dir, "lld.json"),
+        os.path.join(cache_dir, "services"),
+    )
+
+
+def write_cache(cache_dir: str, services: list[ServiceStatus]) -> None:
+    lld_path, services_dir = cache_paths(cache_dir)
+    os.makedirs(services_dir, exist_ok=True)
+
+    lld = {
+        "data": [
+            {"{#SLUG}": s.slug, "{#NAME}": s.name} for s in services if s.slug
+        ]
+    }
+    tmp_lld = lld_path + ".tmp"
+    with open(tmp_lld, "w", encoding="utf-8") as handle:
+        json.dump(lld, handle, ensure_ascii=False, separators=(",", ":"))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_lld, lld_path)
+
+    for service in services:
+        if not service.slug:
+            continue
+        path = os.path.join(services_dir, f"{service.slug}.json")
+        tmp = path + ".tmp"
+        payload = asdict(service)
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+
+
+def read_cached_lld(cache_dir: str) -> dict[str, Any]:
+    lld_path, _ = cache_paths(cache_dir)
+    with open(lld_path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def read_cached_service(cache_dir: str, slug: str) -> dict[str, Any]:
+    slug = validate_slug(slug)
+    _, services_dir = cache_paths(cache_dir)
+    path = os.path.join(services_dir, f"{slug}.json")
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def update_cache(
+    cache_dir: str,
+    *,
+    fetcher: str,
+    flaresolverr_url: str,
+    cookie_file: str | None,
+    delay: float,
+) -> list[ServiceStatus]:
+    """Atualiza o cache local (para cron/systemd). Zabbix só lê esses arquivos."""
+    fetch_kwargs = {
+        "fetcher": fetcher,
+        "flaresolverr_url": flaresolverr_url,
+        "cookie_file": cookie_file,
+    }
+    html = fetch_html(BASE_URL, **fetch_kwargs)
+    services = parse_homepage(html)
+    if not services:
+        raise RuntimeError("Nenhum serviço encontrado na homepage para popular o cache.")
+
+    # Escreve LLD cedo (mesmo antes dos relatos) para discovery não esperar tudo.
+    write_cache(cache_dir, services)
+
+    services = enrich_with_reports(
+        services,
+        fetcher=fetcher,
+        flaresolverr_url=flaresolverr_url,
+        cookie_file=cookie_file,
+        delay=delay,
+        output_path=None,
+    )
+    write_cache(cache_dir, services)
+    return services
+
+
 def collect_data(
     service: str | None = None,
     *,
@@ -635,6 +729,23 @@ def parse_args() -> argparse.Namespace:
         help="URL da API do FlareSolverr (padrão: FLARESOLVERR_URL ou http://localhost:8191/v1).",
     )
     parser.add_argument(
+        "--cache-dir",
+        default=DEFAULT_CACHE_DIR,
+        help=f"Diretório do cache local (padrão: {DEFAULT_CACHE_DIR}).",
+    )
+    parser.add_argument(
+        "--update-cache",
+        action="store_true",
+        help="Atualiza o cache local (homepage + relatos de cada serviço). "
+        "Use via cron/systemd; NÃO chame isso no UserParameter do Zabbix.",
+    )
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Lê --lld / --service --flat do cache (instantâneo). "
+        "É o modo recomendado para o Zabbix Agent.",
+    )
+    parser.add_argument(
         "--cookie-file",
         help="Arquivo de cookies exportado do navegador (JSON ou Netscape).",
     )
@@ -645,6 +756,51 @@ def main() -> int:
     args = parse_args()
 
     try:
+        if args.update_cache:
+            services = update_cache(
+                args.cache_dir,
+                fetcher=args.fetcher,
+                flaresolverr_url=args.flaresolverr_url,
+                cookie_file=args.cookie_file,
+                delay=args.delay,
+            )
+            print(
+                json.dumps(
+                    {
+                        "cache_dir": args.cache_dir,
+                        "services": len(services),
+                        "with_reports": sum(
+                            1 for s in services if s.reports is not None
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return 0
+
+        if args.from_cache:
+            if args.lld:
+                print(json.dumps(read_cached_lld(args.cache_dir), ensure_ascii=False))
+                return 0
+            if args.service and args.flat:
+                print(
+                    json.dumps(
+                        read_cached_service(args.cache_dir, args.service),
+                        ensure_ascii=False,
+                    )
+                )
+                return 0
+            if args.service and args.numeric:
+                data = read_cached_service(args.cache_dir, args.service)
+                print(data.get("status_code", 0))
+                return 0
+            print(
+                "Com --from-cache use: --lld  OU  --service SLUG --flat  "
+                "OU  --service SLUG --numeric",
+                file=sys.stderr,
+            )
+            return 1
+
         if args.lld:
             html = fetch_html(
                 BASE_URL,

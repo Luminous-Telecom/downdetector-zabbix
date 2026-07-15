@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Downdetector cache update every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+Unit=downdetector-cache.service
+
+[Install]
+WantedBy=timers.target

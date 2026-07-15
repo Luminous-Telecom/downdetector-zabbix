@@ -204,8 +204,39 @@ Se tudo isso funcionou, pode seguir para configurar o Zabbix.
 
 ## 6. Instalar e configurar o Zabbix Agent
 
-O agente precisa rodar **no mesmo servidor** onde estão o Python, o script e
-o FlareSolverr, já que o `UserParameter` chama tudo localmente.
+O agente precisa rodar **no mesmo servidor** onde estão o Python, o script,
+o FlareSolverr e o **cache local**.
+
+### Como funciona no Zabbix (importante)
+
+Chamar o FlareSolverr **direto** no `UserParameter` derruba o agent: 48
+serviços × ~20s satura a porta 10050 (`network error` / timeout).
+
+Por isso o modo recomendado é:
+
+1. Um **systemd timer** atualiza o cache em `/var/cache/downdetector-zabbix`
+   a cada 15 minutos (pode demorar vários minutos na primeira rodada).
+2. O **Zabbix Agent** só lê esse cache (`--from-cache`) → resposta em ms.
+
+### 6.0. Subir o cache (obrigatório para o Zabbix)
+
+```bash
+mkdir -p /var/cache/downdetector-zabbix
+cp /opt/downdetector-zabbix/systemd/downdetector-cache.service /etc/systemd/system/
+cp /opt/downdetector-zabbix/systemd/downdetector-cache.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now downdetector-cache.timer
+# primeira coleta (pode levar 10–20 minutos):
+systemctl start downdetector-cache.service
+journalctl -u downdetector-cache.service -f
+```
+
+Quando terminar, teste leituras rápidas:
+
+```bash
+python3 /opt/downdetector-zabbix/downdetector_scraper.py --from-cache --lld | head -c 200
+python3 /opt/downdetector-zabbix/downdetector_scraper.py --from-cache --service whatsapp --flat
+```
 
 ### 6.1. Instalar
 
@@ -233,45 +264,34 @@ Timeout=30
 ### 6.3. Aplicar o UserParameter
 
 ```bash
-mkdir -p /etc/zabbix/zabbix_agent2.d
-cp /opt/downdetector-zabbix/zabbix/downdetector.conf /etc/zabbix/zabbix_agent2.d/downdetector.conf
+mkdir -p /etc/zabbix/zabbix_agentd.d
+cp /opt/downdetector-zabbix/zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
+# se usar agent2 (e a porta 10050 estiver livre):
+# mkdir -p /etc/zabbix/zabbix_agent2.d
+# cp /opt/downdetector-zabbix/zabbix/downdetector.conf /etc/zabbix/zabbix_agent2.d/downdetector.conf
 ```
 
-Se os arquivos estão em `/opt/downdetector-zabbix`, o arquivo já vem com os
-caminhos certos, não precisa editar nada. Se estão em outro lugar, abra o
-arquivo copiado e ajuste os dois caminhos antes de reiniciar o agente:
+O conf já usa `--from-cache` (resposta instantânea). Se os arquivos estão em
+`/opt/downdetector-zabbix`, não precisa editar caminhos.
+
+Reinicie o agent que estiver em uso:
 
 ```bash
-nano /etc/zabbix/zabbix_agent2.d/downdetector.conf
-```
-
-Reinicie e habilite o serviço:
-
-```bash
-systemctl restart zabbix-agent2
-systemctl enable zabbix-agent2
-```
-
-Conteúdo esperado do `zabbix/downdetector.conf`:
-
-```ini
-# Descoberta (LLD): lista todos os serviços da home (rápido, sem relatos).
-UserParameter=downdetector.discovery,/usr/bin/python3 /caminho/downdetector_scraper.py --lld
-
-# Item mestre: dados completos de UM serviço (logo, nome, status, relatos).
-# $1 = slug do serviço, ex.: whatsapp, nubank, steam.
-UserParameter=downdetector.status[*],/usr/bin/python3 /caminho/downdetector_scraper.py --service $1 --flat
+systemctl restart zabbix-agent    # clássico (recomendado se a 10050 já estiver em uso)
+# systemctl restart zabbix-agent2
 ```
 
 ### 6.4. Testar
 
 ```bash
-zabbix_agent2 -t "downdetector.discovery"
-zabbix_agent2 -t "downdetector.status[whatsapp]"
+zabbix_agentd -t "downdetector.discovery"
+zabbix_agentd -t "downdetector.status[whatsapp]"
+# ou, se usar agent2:
+# zabbix_agent2 -t "downdetector.discovery"
 ```
 
-Se aparecer JSON válido nos dois casos, o agente está pronto. Se aparecer
-vazio ou erro, veja a seção de [Troubleshooting](#8-troubleshooting).
+Resposta deve ser **instantânea** (ms). Se der erro de arquivo não encontrado,
+o cache ainda não foi gerado — espere o `downdetector-cache.service` terminar.
 
 ## 7. Criar o Template no Zabbix
 
@@ -297,7 +317,7 @@ vazio ou erro, veja a seção de [Troubleshooting](#8-troubleshooting).
 
 **Item prototypes** dentro dessa discovery rule:
 
-**a) Item mestre** — faz a requisição real, uma vez por serviço:
+**a) Item mestre** — lê o JSON do cache, uma vez por serviço:
 
 | Campo | Valor |
 |---|---|
@@ -306,8 +326,7 @@ vazio ou erro, veja a seção de [Troubleshooting](#8-troubleshooting).
 | Key | `downdetector.status[{#SLUG}]` |
 | Type of information | Text |
 | Update interval | `5m` |
-| Custom timeout (Zabbix ≥6.4) | `30s` |
-| History storage period | `7d` |
+| Custom timeout (Zabbix ≥6.4) | `10s` (com cache basta; leitura local) |
 
 **b) Itens dependentes** — todos com `Type = Dependent item`,
 `Master item = {#NAME}: Downdetector raw`, sem nenhuma requisição nova (só
@@ -344,19 +363,24 @@ todos os campos são extraídos do mesmo JSON.
 
 ## 8. Troubleshooting
 
+- **`Timeout while executing a shell script` / `network error` no host**: o
+  agent está chamando o Cloudflare na hora. Use o modo **cache**
+  (`--from-cache` + `downdetector-cache.timer`). Confira:
+  `systemctl status downdetector-cache.timer` e
+  `ls /var/cache/downdetector-zabbix/services | wc -l`.
 - **`docker: command not found`**: o Docker não foi instalado ou o terminal
   não recarregou o `PATH`. Rode `which docker`; se vazio, refaça o
   [passo 2](#2-instalar-o-docker).
 - **`HTTP 403` / "página de desafio Cloudflare"**: o FlareSolverr não está
   rodando ou não está acessível. Confira `docker ps` e
-  `curl http://localhost:8191/v1`.
-- **Zabbix agent retorna vazio/timeout**: aumente `Timeout=30` no
-  `zabbix_agent2.conf` (e, em versões <6.4, também no `zabbix_server.conf` /
-  `zabbix_proxy.conf`, já que o timeout do agente é limitado pelo do
-  servidor nesses casos). Cada chamada ao script pode levar até ~25-30s.
-- **Muitos serviços descobertos e FlareSolverr sobrecarregado**: aumente o
-  `Update interval` dos itens mestre (ex.: `10m` ou `15m`) — o status de um
-  serviço não muda a cada poucos minutos na maioria dos casos.
+  `curl http://localhost:8191/v1`. Confira também o serviço de cache:
+  `journalctl -u downdetector-cache.service -n 50`.
+- **Zabbix agent retorna vazio/timeout**: com `--from-cache` o Timeout=10s
+  basta. Se ainda usa coleta live (`--service` sem cache), aumente
+  `Timeout=30` no agent e no server.
+- **Muitos serviços + FlareSolverr lento**: o timer de cache já serializa a
+  coleta; o Zabbix só lê disco. Não volte o UserParameter para chamar
+  `--service` ao vivo.
 - **`ModuleNotFoundError` ao rodar o script**: as dependências Python não
   foram instaladas para o usuário/interpretador que está executando. Refaça
   o [passo 3](#3-instalar-as-dependências-python) — se usar virtualenv,
@@ -373,5 +397,6 @@ todos os campos são extraídos do mesmo JSON.
 downdetector_scraper.py     # script principal
 docker-compose.yml          # FlareSolverr
 requirements.txt            # dependências Python
-zabbix/downdetector.conf    # UserParameters prontos para copiar
+zabbix/downdetector.conf    # UserParameters (--from-cache)
+systemd/                    # timer que atualiza o cache a cada 15 min
 ```
