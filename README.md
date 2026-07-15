@@ -29,7 +29,9 @@ zabbix_agentd -t "downdetector.status[whatsapp]"
 ## 2. Importar o template
 
 **Data collection → Templates → Import** →  
-`zabbix/template_downdetector_br.yaml`
+arquivo **`zabbix/template_downdetector_br.xml`** (não use YAML antigo em cache).
+
+No coletor: `git pull` antes de copiar o XML.
 
 ## 3. Criar hosts (um por serviço)
 
