@@ -8,6 +8,7 @@ Type=oneshot
 User=zabbix
 Group=zabbix
 Nice=10
-# Um scrape por vez — não compete com o agent
+EnvironmentFile=-/etc/zabbix/downdetector-api.env
+# Lista de hosts = API Zabbix (template downdetector). Agent só lê cache.
 ExecStart=/usr/bin/python3 /opt/downdetector-zabbix/downdetector_scraper.py --refresh-all --delay 1.5
 TimeoutStartSec=7200

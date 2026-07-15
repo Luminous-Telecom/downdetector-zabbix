@@ -2,8 +2,8 @@
 """
 Coleta um serviço do Downdetector BR para o Zabbix.
 
-Cada host Zabbix = um serviço (Host name = slug).
-Agent: --from-cache (só lê disco). Timer: --refresh-all (FlareSolverr).
+Cada host no Zabbix web = um serviço (Host name = slug).
+Agent: --from-cache. Timer: --refresh-all (lista hosts via API do Zabbix).
 
   python3 downdetector_scraper.py --service whatsapp --from-cache --flat
   python3 downdetector_scraper.py --refresh-all
@@ -45,10 +45,6 @@ DEFAULT_CACHE_DIR = os.environ.get(
     "DOWNDETECTOR_CACHE_DIR", "/var/cache/downdetector-zabbix"
 )
 DEFAULT_CACHE_TTL = int(os.environ.get("DOWNDETECTOR_CACHE_TTL", "300"))
-DEFAULT_SERVICES_FILE = os.environ.get(
-    "DOWNDETECTOR_SERVICES_FILE",
-    "/opt/downdetector-zabbix/services.txt",
-)
 BASE_URL = "https://downdetector.com.br/"
 SERVICE_URL_TEMPLATE = BASE_URL + "fora-do-ar/{slug}/"
 SLUG_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,80}$")
@@ -374,26 +370,10 @@ def read_from_cache(cache_dir: str, slug: str) -> dict[str, Any]:
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"cache ausente para {slug!r} ({path}). "
-            "Inclua o slug em services.txt e rode "
+            "Espere o timer downdetector-refresh ou rode: "
             "systemctl start downdetector-refresh.service"
         )
     return read_cache_file(path)
-
-
-def read_services_file(path: str) -> list[str]:
-    if not os.path.isfile(path):
-        return []
-    slugs: list[str] = []
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            slug = line.split("|", 1)[0].strip()
-            validate_slug(slug)
-            if slug not in slugs:
-                slugs.append(slug)
-    return slugs
 
 
 def discover_cached_slugs(cache_dir: str) -> list[str]:
@@ -411,24 +391,169 @@ def discover_cached_slugs(cache_dir: str) -> list[str]:
     return slugs
 
 
+def zabbix_api(
+    url: str,
+    method: str,
+    params: dict[str, Any],
+    *,
+    token: str | None = None,
+    auth: str | None = None,
+) -> Any:
+    headers = {"Content-Type": "application/json-rpc"}
+    payload: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 1,
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    elif auth:
+        payload["auth"] = auth
+
+    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("error"):
+        err = data["error"]
+        raise RuntimeError(
+            f"Zabbix API {method}: {err.get('message')} — {err.get('data')}"
+        )
+    return data.get("result")
+
+
+def discover_zabbix_slugs(
+    url: str,
+    *,
+    token: str | None = None,
+    user: str | None = None,
+    password: str | None = None,
+    template_name: str = "downdetector",
+) -> list[str]:
+    """Hosts ativos com o template downdetector (Host name = slug)."""
+    auth: str | None = None
+    if not token:
+        if not user or not password:
+            raise RuntimeError(
+                "Configure ZABBIX_TOKEN (ou ZABBIX_USER + ZABBIX_PASSWORD)."
+            )
+        auth = zabbix_api(
+            url,
+            "user.login",
+            {"username": user, "password": password},
+        )
+        if not isinstance(auth, str):
+            raise RuntimeError("Falha no user.login da API Zabbix.")
+
+    templates = zabbix_api(
+        url,
+        "template.get",
+        {"output": ["templateid", "host", "name"], "filter": {"host": [template_name]}},
+        token=token,
+        auth=auth,
+    )
+    if not templates:
+        templates = zabbix_api(
+            url,
+            "template.get",
+            {
+                "output": ["templateid", "host", "name"],
+                "filter": {"name": [template_name]},
+            },
+            token=token,
+            auth=auth,
+        )
+    if not templates:
+        raise RuntimeError(
+            f"Template {template_name!r} não encontrado na API Zabbix."
+        )
+
+    hosts = zabbix_api(
+        url,
+        "host.get",
+        {
+            "output": ["host", "name", "status"],
+            "templateids": [templates[0]["templateid"]],
+            "filter": {"status": 0},
+        },
+        token=token,
+        auth=auth,
+    )
+
+    slugs: list[str] = []
+    for host in hosts or []:
+        slug = (host.get("host") or "").strip()
+        if SLUG_RE.match(slug) and slug not in slugs:
+            slugs.append(slug)
+    return slugs
+
+
+def resolve_refresh_slugs(
+    *,
+    cache_dir: str,
+    zabbix_url: str | None,
+    zabbix_token: str | None,
+    zabbix_user: str | None,
+    zabbix_password: str | None,
+    template_name: str,
+) -> list[str]:
+    ordered: list[str] = []
+
+    if zabbix_url and (zabbix_token or (zabbix_user and zabbix_password)):
+        api_slugs = discover_zabbix_slugs(
+            zabbix_url,
+            token=zabbix_token,
+            user=zabbix_user,
+            password=zabbix_password,
+            template_name=template_name,
+        )
+        print(
+            f"API Zabbix: {len(api_slugs)} host(s) com template {template_name!r}",
+            file=sys.stderr,
+            flush=True,
+        )
+        ordered.extend(api_slugs)
+    else:
+        print(
+            "AVISO: ZABBIX_URL/TOKEN não configurados — "
+            "usando só arquivos já existentes no cache.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    for slug in discover_cached_slugs(cache_dir):
+        if slug not in ordered:
+            ordered.append(slug)
+    return ordered
+
+
 def refresh_all(
     *,
     cache_dir: str,
-    services_file: str,
     fetcher: str,
     flaresolverr_url: str,
     delay: float,
+    zabbix_url: str | None,
+    zabbix_token: str | None,
+    zabbix_user: str | None,
+    zabbix_password: str | None,
+    template_name: str,
 ) -> int:
-    """Atualiza caches em série (timer systemd). Agent só lê o resultado."""
-    ordered: list[str] = []
-    for slug in read_services_file(services_file) + discover_cached_slugs(cache_dir):
-        if slug not in ordered:
-            ordered.append(slug)
+    """Atualiza caches em série (timer). Lista vem da API do Zabbix."""
+    ordered = resolve_refresh_slugs(
+        cache_dir=cache_dir,
+        zabbix_url=zabbix_url,
+        zabbix_token=zabbix_token,
+        zabbix_user=zabbix_user,
+        zabbix_password=zabbix_password,
+        template_name=template_name,
+    )
 
     if not ordered:
         print(
-            f"Nenhum slug em {services_file} nem em {cache_dir}. "
-            "Liste um slug por linha em services.txt.",
+            "Nenhum host para atualizar. Cadastre hosts no Zabbix web "
+            f"com o template {template_name!r} (Host name = slug) e "
+            "configure /etc/zabbix/downdetector-api.env",
             file=sys.stderr,
         )
         return 1
@@ -479,19 +604,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--refresh-all",
         action="store_true",
-        help="Atualiza em série todos os slugs de services.txt + cache. "
+        help="Atualiza em série os hosts do template via API Zabbix. "
         "Use no systemd timer — NÃO no UserParameter.",
-    )
-    parser.add_argument(
-        "--services-file",
-        default=DEFAULT_SERVICES_FILE,
-        help=f"Lista de slugs (padrão: {DEFAULT_SERVICES_FILE}).",
     )
     parser.add_argument(
         "--delay",
         type=float,
         default=1.0,
         help="Pausa entre scrapes no --refresh-all (padrão: 1s).",
+    )
+    parser.add_argument(
+        "--zabbix-url",
+        default=os.environ.get("ZABBIX_URL"),
+        help="URL da API (ex.: http://127.0.0.1/api_jsonrpc.php). Env ZABBIX_URL.",
+    )
+    parser.add_argument(
+        "--zabbix-token",
+        default=os.environ.get("ZABBIX_TOKEN"),
+        help="API token (Users → API tokens). Env ZABBIX_TOKEN.",
+    )
+    parser.add_argument(
+        "--zabbix-user",
+        default=os.environ.get("ZABBIX_USER"),
+        help="Usuário API (alternativa ao token). Env ZABBIX_USER.",
+    )
+    parser.add_argument(
+        "--zabbix-password",
+        default=os.environ.get("ZABBIX_PASSWORD"),
+        help="Senha API. Env ZABBIX_PASSWORD.",
+    )
+    parser.add_argument(
+        "--zabbix-template",
+        default=os.environ.get("ZABBIX_TEMPLATE", "downdetector"),
+        help="Nome técnico do template (padrão: downdetector).",
     )
     parser.add_argument(
         "--flat",
@@ -534,10 +679,14 @@ def main() -> int:
     if args.refresh_all:
         return refresh_all(
             cache_dir=args.cache_dir,
-            services_file=args.services_file,
             fetcher=args.fetcher,
             flaresolverr_url=args.flaresolverr_url,
             delay=args.delay,
+            zabbix_url=args.zabbix_url,
+            zabbix_token=args.zabbix_token,
+            zabbix_user=args.zabbix_user,
+            zabbix_password=args.zabbix_password,
+            template_name=args.zabbix_template,
         )
 
     if not args.service:
