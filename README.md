@@ -1,11 +1,11 @@
 # Downdetector BR → Zabbix 7.0
 
-**Cada host = um serviço** (WhatsApp, Instagram…).  
-Template `downdetector` + macro `{$DOWNDETECTOR.SLUG}` no host.
+**Cada host = um serviço.** O slug é o **Host name** técnico (`{HOST.HOST}`).
+Sem macro.
 
 ```
-Host "WhatsApp"     {$DOWNDETECTOR.SLUG}=whatsapp
-Host "Instagram"    {$DOWNDETECTOR.SLUG}=instagram
+Host name: whatsapp      Visible name: WhatsApp
+Host name: instagram     Visible name: Instagram
         │  Agent → IP do coletor
         ▼
 Coletador (FlareSolverr + script + zabbix-agent)
@@ -25,7 +25,7 @@ systemctl restart zabbix-agent
 zabbix_agentd -t "downdetector.status[whatsapp]"
 ```
 
-## 2. Importar o template (Zabbix 7.0)
+## 2. Template
 
 **Data collection → Templates → Import** →  
 `zabbix/template_downdetector_br.yaml`
@@ -34,15 +34,16 @@ zabbix_agentd -t "downdetector.status[whatsapp]"
 
 | Campo | Valor |
 |---|---|
-| Host name | `WhatsApp` |
+| Host name | `whatsapp` (slug da URL, minúsculo) |
+| Visible name | `WhatsApp` (opcional, só exibição) |
 | Interfaces | Agent → IP do coletor :10050 |
 | Templates | `downdetector` |
-| Macros | `{$DOWNDETECTOR.SLUG}` = `whatsapp` |
 
-Slug = URL: `https://downdetector.com.br/fora-do-ar/<slug>/`
+URL: `https://downdetector.com.br/fora-do-ar/<Host name>/`
 
 ## Troubleshooting
 
 - **Timeout**: `Timeout=30` no agent e no Server
 - **Unsupported item key**: conf no agentd.d + restart
 - **403**: FlareSolverr na porta 8191
+- **Item não acha serviço**: Host name tem que ser o slug (`whatsapp`, não `WhatsApp`)

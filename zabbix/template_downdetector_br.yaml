@@ -9,20 +9,16 @@ zabbix_export:
       name: downdetector
       groups:
         - name: downdetector
-      description: "Um host Zabbix = um serviço (WhatsApp, Instagram, …).\n\nNo host, defina a macro:\n  {$DOWNDETECTOR.SLUG} = whatsapp\n\nInterface Agent = IP do servidor coletor (agent + FlareSolverr).\n\nCódigos: 1=ok, 2=warning, 3=danger, 0=unknown."
-      macros:
-        - macro: "{$DOWNDETECTOR.SLUG}"
-          value: whatsapp
-          description: "Slug na URL: downdetector.com.br/fora-do-ar/<slug>/"
+      description: "Um host Zabbix = um serviço do Downdetector.\n\nHost name (técnico) = slug da URL:\n  whatsapp → downdetector.com.br/fora-do-ar/whatsapp/\n\nVisible name pode ser \"WhatsApp\".\nInterface Agent = IP do coletor (FlareSolverr + script).\n\nCódigos: 1=ok, 2=warning, 3=danger, 0=unknown."
       items:
         - uuid: d93a572038bd45aa93a62a3de92da1d6
           name: "Downdetector: raw"
           type: ZABBIX_PASSIVE
-          key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+          key: "downdetector.status[{HOST.HOST}]"
           delay: 15m
           history: 7d
           value_type: TEXT
-          description: "JSON completo do serviço."
+          description: "JSON completo. Slug = Host name técnico."
           tags:
             - tag: component
               value: raw
@@ -40,7 +36,7 @@ zabbix_export:
                 - $.status_code
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: status
@@ -65,7 +61,7 @@ zabbix_export:
                 - $.status
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: status
@@ -82,7 +78,7 @@ zabbix_export:
                 - $.reports
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: reports
@@ -99,7 +95,7 @@ zabbix_export:
                 - $.reports_baseline
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: reports
@@ -115,7 +111,7 @@ zabbix_export:
                 - $.name
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: meta
@@ -131,7 +127,7 @@ zabbix_export:
                 - $.logo
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector.status[{$DOWNDETECTOR.SLUG}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: meta
