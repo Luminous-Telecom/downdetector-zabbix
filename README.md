@@ -21,7 +21,8 @@ docker compose up -d
 # Timeout=30 no agent (máximo do agentd clássico; 60 é rejeitado)
 cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
 mkdir -p /var/cache/downdetector-zabbix
-chmod 755 /var/cache/downdetector-zabbix
+chown -R zabbix:zabbix /var/cache/downdetector-zabbix
+chmod 775 /var/cache/downdetector-zabbix
 systemctl restart zabbix-agent
 
 # 1ª chamada pode demorar (~FlareSolverr); seguintes <1s (cache 15 min)
@@ -46,6 +47,8 @@ URL: `https://downdetector.com.br/fora-do-ar/<Host name>/`
 
 ## Troubleshooting
 
+- **Permission denied** em `/var/cache/downdetector-zabbix`:
+  `chown -R zabbix:zabbix /var/cache/downdetector-zabbix`
 - **Timeout**: agentd clássico aceita no máximo **30** (60 é rejeitado e o agent não sobe)
 - **read timeout / ZBX vermelho**: use cache (`--cache-ttl 900` no conf) e item raw ≥ 15m
 - **Unsupported item key**: conf no agentd.d + restart
