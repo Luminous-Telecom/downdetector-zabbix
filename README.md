@@ -11,7 +11,7 @@ Zabbix web: host "caixa" + template downdetector
 Zabbix Server ──► /usr/lib/zabbix/externalscripts/downdetector
                 └─► lê /var/cache/.../caixa.json  (ms)
 
-Timer (5 min) ──API──► hosts do template ──► FlareSolverr (1 a 1) ──► cache/
+Timer ──API──► hosts do template ──► FlareSolverr (**N em paralelo**) ──► cache/
 ```
 
 ## 1. Coletor / Server (mesmo servidor)

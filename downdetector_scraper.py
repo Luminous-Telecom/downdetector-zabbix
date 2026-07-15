@@ -15,9 +15,12 @@ import argparse
 import fcntl
 import json
 import os
+import queue
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -128,28 +131,104 @@ def fetch_with_curl_cffi(url: str, timeout: int) -> str:
     return response.text
 
 
-def fetch_with_flaresolverr(url: str, timeout: int, flaresolverr_url: str) -> str:
-    payload = {
+def _flaresolverr_request(
+    flaresolverr_url: str,
+    url: str,
+    timeout: int,
+    *,
+    session_id: str | None = None,
+) -> str:
+    payload: dict[str, Any] = {
         "cmd": "request.get",
         "url": url,
         "maxTimeout": max(timeout, 60) * 1000,
     }
+    if session_id:
+        payload["session"] = session_id
     response = requests.post(flaresolverr_url, json=payload, timeout=max(timeout, 120))
     response.raise_for_status()
     data = response.json()
-
     if data.get("status") != "ok":
         raise RuntimeError(data.get("message", "erro desconhecido no FlareSolverr"))
-
     solution = data.get("solution", {})
     status_code = solution.get("status")
     html = solution.get("response", "")
-
     if status_code != 200:
         raise RuntimeError(f"HTTP {status_code}")
     if not html:
         raise RuntimeError("resposta vazia do FlareSolverr")
     return html
+
+
+class FlareSolverrPool:
+    """Várias sessões quentes do FlareSolverr para scrape paralelo."""
+
+    def __init__(self, api_url: str, size: int = 4) -> None:
+        self.api_url = api_url
+        self.size = max(1, size)
+        self._sessions: list[str] = []
+        self._free: queue.Queue[str] = queue.Queue()
+
+    def __enter__(self) -> "FlareSolverrPool":
+        print(
+            f"FlareSolverr: criando {self.size} sessão(ões)...",
+            file=sys.stderr,
+            flush=True,
+        )
+        for _ in range(self.size):
+            response = requests.post(
+                self.api_url, json={"cmd": "sessions.create"}, timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("status") != "ok" or not data.get("session"):
+                raise RuntimeError(
+                    data.get("message", "falha ao criar sessão no FlareSolverr")
+                )
+            self._sessions.append(data["session"])
+
+        def warm(sid: str) -> None:
+            _flaresolverr_request(self.api_url, BASE_URL, 120, session_id=sid)
+
+        with ThreadPoolExecutor(max_workers=self.size) as executor:
+            list(executor.map(warm, self._sessions))
+        for sid in self._sessions:
+            self._free.put(sid)
+        print("FlareSolverr: sessões aquecidas.", file=sys.stderr, flush=True)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        for sid in self._sessions:
+            try:
+                requests.post(
+                    self.api_url,
+                    json={"cmd": "sessions.destroy", "session": sid},
+                    timeout=30,
+                )
+            except Exception:
+                pass
+        self._sessions.clear()
+
+    def fetch(self, url: str, timeout: int = 60) -> str:
+        sid = self._free.get()
+        try:
+            return _flaresolverr_request(
+                self.api_url, url, timeout, session_id=sid
+            )
+        finally:
+            self._free.put(sid)
+
+
+_fs_pool: FlareSolverrPool | None = None
+_fs_pool_lock = threading.Lock()
+
+
+def fetch_with_flaresolverr(url: str, timeout: int, flaresolverr_url: str) -> str:
+    with _fs_pool_lock:
+        pool = _fs_pool
+    if pool is not None:
+        return pool.fetch(url, timeout)
+    return _flaresolverr_request(flaresolverr_url, url, timeout)
 
 
 def fetch_html(
@@ -160,9 +239,14 @@ def fetch_html(
     flaresolverr_url: str = DEFAULT_FLARESOLVERR_URL,
 ) -> str:
     errors: list[str] = []
-    fetchers = (
-        ["requests", "curl_cffi", "flaresolverr"] if fetcher == "auto" else [fetcher]
-    )
+    if _fs_pool is not None and fetcher in ("auto", "flaresolverr"):
+        fetchers = ["flaresolverr"]
+    else:
+        fetchers = (
+            ["requests", "curl_cffi", "flaresolverr"]
+            if fetcher == "auto"
+            else [fetcher]
+        )
 
     for method in fetchers:
         try:
@@ -571,13 +655,16 @@ def refresh_all(
     fetcher: str,
     flaresolverr_url: str,
     delay: float,
+    workers: int,
     zabbix_url: str | None,
     zabbix_token: str | None,
     zabbix_user: str | None,
     zabbix_password: str | None,
     template_name: str,
 ) -> int:
-    """Atualiza caches em série (timer). Lista vem da API do Zabbix."""
+    """Atualiza caches em paralelo (FlareSolverr sessions). Lista via API."""
+    global _fs_pool
+
     ordered = resolve_refresh_slugs(
         cache_dir=cache_dir,
         zabbix_url=zabbix_url,
@@ -596,30 +683,73 @@ def refresh_all(
         )
         return 1
 
+    workers = max(1, workers)
+    total = len(ordered)
     ok = 0
     fail = 0
-    total = len(ordered)
-    for i, slug in enumerate(ordered, start=1):
+    done = 0
+    done_lock = threading.Lock()
+
+    use_pool = fetcher in ("auto", "flaresolverr") and workers >= 1
+    pool: FlareSolverrPool | None = None
+    if use_pool:
+        pool = FlareSolverrPool(flaresolverr_url, size=workers)
+        pool.__enter__()
+        with _fs_pool_lock:
+            _fs_pool = pool
+        fetcher = "flaresolverr"
+
+    def one(slug: str) -> tuple[str, bool, str]:
+        nonlocal done
         try:
             service = fetch_service(
                 slug, fetcher=fetcher, flaresolverr_url=flaresolverr_url
             )
             write_cache_file(cache_path(cache_dir, slug), asdict(service))
-            ok += 1
-            print(
-                f"[{i}/{total}] {slug}: {service.status} reports={service.reports}",
-                file=sys.stderr,
-                flush=True,
-            )
+            msg = f"{service.status} reports={service.reports}"
+            success = True
         except Exception as exc:
-            fail += 1
-            print(f"[{i}/{total}] {slug}: ERRO {exc}", file=sys.stderr, flush=True)
-        if delay > 0 and i < total:
+            msg = f"ERRO {exc}"
+            success = False
+        if delay > 0:
             time.sleep(delay)
+        with done_lock:
+            done += 1
+            print(f"[{done}/{total}] {slug}: {msg}", file=sys.stderr, flush=True)
+        return slug, success, msg
+
+    try:
+        if workers <= 1:
+            for slug in ordered:
+                _, success, _ = one(slug)
+                if success:
+                    ok += 1
+                else:
+                    fail += 1
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(one, slug) for slug in ordered]
+                for fut in as_completed(futures):
+                    _, success, _ = fut.result()
+                    if success:
+                        ok += 1
+                    else:
+                        fail += 1
+    finally:
+        with _fs_pool_lock:
+            _fs_pool = None
+        if pool is not None:
+            pool.__exit__(None, None, None)
 
     print(
         json.dumps(
-            {"updated": ok, "failed": fail, "total": total, "cache_dir": cache_dir},
+            {
+                "updated": ok,
+                "failed": fail,
+                "total": total,
+                "workers": workers,
+                "cache_dir": cache_dir,
+            },
             ensure_ascii=False,
         )
     )
@@ -642,14 +772,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--refresh-all",
         action="store_true",
-        help="Atualiza em série os hosts do template via API Zabbix. "
+        help="Atualiza em paralelo os hosts do template via API Zabbix. "
         "Use no systemd timer — NÃO no UserParameter.",
     )
     parser.add_argument(
         "--delay",
         type=float,
-        default=1.0,
-        help="Pausa entre scrapes no --refresh-all (padrão: 1s).",
+        default=0.0,
+        help="Pausa extra por worker após cada scrape (padrão: 0).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.environ.get("DOWNDETECTOR_WORKERS", "4")),
+        help="Sessões FlareSolverr em paralelo no --refresh-all (padrão: 4).",
     )
     parser.add_argument(
         "--zabbix-url",
@@ -720,6 +856,7 @@ def main() -> int:
             fetcher=args.fetcher,
             flaresolverr_url=args.flaresolverr_url,
             delay=args.delay,
+            workers=args.workers,
             zabbix_url=args.zabbix_url,
             zabbix_token=args.zabbix_token,
             zabbix_user=args.zabbix_user,
