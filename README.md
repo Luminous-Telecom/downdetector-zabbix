@@ -20,28 +20,74 @@ Baseado no trabalho de **[Takdanai Deephuak (oTaKaTo)](https://github.com/oTaKaT
 ## Pré-requisitos
 
 - Node.js ≥ 18
+- [Docker](https://docs.docker.com/engine/install/) (para o FlareSolverr)
 - [PM2](https://pm2.keymetrics.io/) (produção)
 - [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) rodando (ex.: `http://127.0.0.1:8191/v1`)
 
-FlareSolverr com Docker:
+### Instalar o Docker
+
+Debian / Ubuntu:
+
+```bash
+# Pacotes base
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+
+# Repositório oficial Docker
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Instalar Engine + Compose plugin
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Subir o serviço e (opcional) permitir docker sem sudo
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+# depois: saia e entre de novo na sessão SSH para o grupo valer
+
+docker --version
+```
+
+> No **Ubuntu**, troque `linux/debian` por `linux/ubuntu` nas URLs acima (gpg e `sources.list`).  
+> Guia oficial: https://docs.docker.com/engine/install/
+
+### Instalar o FlareSolverr (Docker)
 
 ```bash
 docker run -d --name flaresolverr --restart unless-stopped \
   -p 8191:8191 \
   ghcr.io/flaresolverr/flaresolverr:latest
+
+docker ps | grep flaresolverr
+curl -s http://127.0.0.1:8191/health
 ```
 
-PM2 global (uma vez no servidor):
+### Instalar o PM2
+
+No servidor (global, uma vez):
 
 ```bash
 npm install -g pm2
+pm2 -v
 ```
+
+Se o comando `pm2` não for encontrado, confirme que o npm global está no `PATH` (Node instalado via pacote oficial ou nvm).
 
 ---
 
 ## Instalação (produção com PM2)
 
 ```bash
+# 0. Docker + FlareSolverr + PM2 (se ainda não instalou — ver Pré-requisitos)
+npm install -g pm2
+
 # 1. Código
 cd /opt
 git clone git@github.com:Luminous-Telecom/downdetector-zabbix.git downdetector-zabbix
