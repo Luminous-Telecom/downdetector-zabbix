@@ -185,7 +185,7 @@ Alert threshold: 50 minutes
 5. If it keeps crashing, look for:
    • Out-of-memory kills (check dmesg | grep -i oom)
    • Disk full (df -h)
-   • Chrome/Puppeteer zombie processes
+   • FlareSolverr offline (check FLARESOLVERR_URL)
    • Cloudflare D1 / R2 credential expiry
 ```
 
