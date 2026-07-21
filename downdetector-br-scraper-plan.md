@@ -22,7 +22,7 @@ Requisitos:
 
 ## 2. Origem e evolução
 
-Base inicial: fork do scraper TH/Puppeteer (oTaKaTo / erucix).
+Base inicial: [oTaKaTo/downdetector-scraper](https://github.com/oTaKaTo/downdetector-scraper) por [Takdanai Deephuak (oTaKaTo)](https://github.com/oTaKaTo).
 
 Adaptações para o BR:
 

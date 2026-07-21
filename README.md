@@ -4,6 +4,8 @@ API HTTP em Node.js para monitorar status de serviços no **[downdetector.com.br
 
 A coleta é feita **somente via FlareSolverr** (sem Chrome/Puppeteer na aplicação). Um cron em background atualiza o resumo da homepage a cada ~15 minutos; os endpoints `/api/*` exigem token.
 
+Baseado no trabalho de **[Takdanai Deephuak (oTaKaTo)](https://github.com/oTaKaTo)** — ver [Créditos](#créditos).
+
 ---
 
 ## O que faz
@@ -243,6 +245,17 @@ Log append-only do ciclo de cada incidente.
 
 ---
 
+## Créditos
+
+Este projeto é uma adaptação para o **Downdetector Brasil** do scraper original criado por:
+
+- **[Takdanai Deephuak (oTaKaTo)](https://github.com/oTaKaTo)**
+- Repositório original: **[oTaKaTo/downdetector-scraper](https://github.com/oTaKaTo/downdetector-scraper)**
+
+A versão atual mantém a ideia da API HTTP + monitoramento contínuo, mas troca Puppeteer por FlareSolverr, aponta para `downdetector.com.br` e adiciona autenticação por `API_TOKEN`.
+
+---
+
 ## Licença
 
-MIT (ver `LICENSE`).
+MIT — copyright original de Takdanai Deephuak (ver `LICENSE`).

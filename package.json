@@ -1,19 +1,20 @@
 {
-  "name": "downdetector-th-scraper",
-  "version": "1.0.0",
-  "description": "Puppeteer-based scraper for downdetector.com.br — stealth-hardened, Cloudflare-resilient",
+  "name": "downdetector-br-scraper",
+  "version": "2.0.0",
+  "description": "API HTTP para monitorar downdetector.com.br via FlareSolverr (adaptado de oTaKaTo/downdetector-scraper)",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
     "dev": "node app.js"
   },
   "keywords": [
-    "puppeteer",
+    "downdetector",
     "scraper",
-    "downdetector"
+    "flaresolverr",
+    "brasil"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Adaptado de Takdanai Deephuak (oTaKaTo) — https://github.com/oTaKaTo/downdetector-scraper",
+  "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
     "dotenv": "^16.6.1",
