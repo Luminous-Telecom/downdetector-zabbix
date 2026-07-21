@@ -20,31 +20,88 @@ Baseado no trabalho de **[Takdanai Deephuak (oTaKaTo)](https://github.com/oTaKaT
 ## Pré-requisitos
 
 - Node.js ≥ 18
+- [PM2](https://pm2.keymetrics.io/) (produção)
 - [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) rodando (ex.: `http://127.0.0.1:8191/v1`)
 
-Exemplo com Docker:
+FlareSolverr com Docker:
 
 ```bash
-docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest
+docker run -d --name flaresolverr --restart unless-stopped \
+  -p 8191:8191 \
+  ghcr.io/flaresolverr/flaresolverr:latest
+```
+
+PM2 global (uma vez no servidor):
+
+```bash
+npm install -g pm2
 ```
 
 ---
 
-## Instalação
+## Instalação (produção com PM2)
+
+```bash
+# 1. Código
+cd /opt
+git clone git@github.com:Luminous-Telecom/downdetector-zabbix.git downdetector-zabbix
+cd downdetector-zabbix
+
+# 2. Dependências
+npm install --omit=dev
+
+# 3. Ambiente
+cp .env.example .env
+openssl rand -hex 32   # cole o valor em API_TOKEN no .env
+# Ajuste FLARESOLVERR_URL se o FlareSolverr não estiver em 127.0.0.1:8191
+
+# 4. Subir com PM2 (NODE_ENV=production via ecosystem.config.cjs)
+pm2 start ecosystem.config.cjs
+
+# 5. Persistência após reboot
+pm2 save
+pm2 startup
+# execute o comando que o pm2 startup imprimir (sudo env PATH=...)
+```
+
+Conferir:
+
+```bash
+pm2 status
+pm2 logs downdetector-br
+curl -s http://127.0.0.1:3333/
+```
+
+Comandos úteis:
+
+| Comando | Ação |
+|---|---|
+| `pm2 restart downdetector-br` | Reinicia a API |
+| `pm2 reload ecosystem.config.cjs` | Reload sem downtime (fork) |
+| `pm2 stop downdetector-br` | Para o processo |
+| `pm2 logs downdetector-br` | Logs em tempo real |
+| `npm run pm2:start` | Atalho npm para o start |
+
+Atualizar o servidor:
+
+```bash
+cd /opt/downdetector-zabbix
+git pull
+npm install --omit=dev
+pm2 reload ecosystem.config.cjs
+```
+
+> **Importante:** use sempre **1 instância** (`ecosystem.config.cjs`). Cache em memória e cron interno não funcionam com cluster/múltiplos workers.
+
+### Desenvolvimento local (sem PM2)
 
 ```bash
 npm install
-cp .env.example .env
+cp .env.example .env   # preencha API_TOKEN
+npm start
 ```
 
-Gere um token e coloque no `.env`:
-
-```bash
-openssl rand -hex 32
-# API_TOKEN=...
-```
-
-Variáveis principais:
+### Variáveis principais
 
 | Variável | Obrigatório | Descrição |
 |---|---|---|
@@ -57,14 +114,6 @@ Variáveis principais:
 | `CLOUDFLARE_*` / `D1_*` | Não | Persistência de alertas no D1 |
 | `POWER_AUTOMATE_WEBHOOK_URL` | Não | Notificações no Teams |
 | `R2_*` | Não | Upload de screenshots (legado/opcional) |
-
-Subir:
-
-```bash
-npm run dev
-# ou
-npm start
-```
 
 ---
 
@@ -185,6 +234,7 @@ Fluxo do cron:
 ```
 downdetector/
 ├── app.js                 ← servidor HTTP + cron
+├── ecosystem.config.cjs   ← PM2 (produção, 1 instância)
 ├── src/
 │   ├── flaresolverr.js    ← cliente FlareSolverr
 │   ├── homepage.js        ← parse da homepage
@@ -242,6 +292,8 @@ Log append-only do ciclo de cada incidente.
 | `FlareSolverr HTTP` / challenge | Container no ar em `:8191`; `FLARESOLVERR_URL` |
 | Dados “atrasados” no summary | Cron de 15 min ou `?refresh=1` |
 | D1 / notify com erro | Credenciais opcionais vazias — a coleta da API continua funcionando |
+| PM2 cai após reboot | Rodar `pm2 save` e `pm2 startup` (e o comando sudo sugerido) |
+| `EADDRINUSE :3333` | Já há outro processo na porta — `pm2 status` / `ss -tlnp \| grep 3333` |
 
 ---
 
