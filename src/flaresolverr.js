@@ -1,10 +1,31 @@
 /**
  * flaresolverr.js
  * HTTP fetch via FlareSolverr (no local browser).
+ * Aceita apenas endpoint em loopback (127.0.0.1 / localhost).
  */
 
 const FLARESOLVERR_URL =
   process.env.FLARESOLVERR_URL || 'http://127.0.0.1:8191/v1';
+
+function assertLocalFlareSolverr(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(
+      `FLARESOLVERR_URL inválida: ${url}. Use http://127.0.0.1:8191/v1`
+    );
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
+    throw new Error(
+      `FLARESOLVERR_URL deve apontar só para localhost (recebido: ${host}). ` +
+        `Use http://127.0.0.1:8191/v1 e publique o Docker com -p 127.0.0.1:8191:8191`
+    );
+  }
+}
+
+assertLocalFlareSolverr(FLARESOLVERR_URL);
 
 /**
  * Fetch a URL through FlareSolverr and return HTML.

@@ -60,13 +60,32 @@ docker --version
 
 ### Instalar o FlareSolverr (Docker)
 
+Expor **somente em localhost** (`127.0.0.1`) — não publique a porta na rede:
+
 ```bash
 docker run -d --name flaresolverr --restart unless-stopped \
-  -p 8191:8191 \
+  -p 127.0.0.1:8191:8191 \
   ghcr.io/flaresolverr/flaresolverr:latest
 
 docker ps | grep flaresolverr
 curl -s http://127.0.0.1:8191/health
+```
+
+Se o container já existir com `-p 8191:8191` (todas as interfaces), recria:
+
+```bash
+docker rm -f flaresolverr
+docker run -d --name flaresolverr --restart unless-stopped \
+  -p 127.0.0.1:8191:8191 \
+  ghcr.io/flaresolverr/flaresolverr:latest
+```
+
+A API Node deve usar `FLARESOLVERR_URL=http://127.0.0.1:8191/v1` (padrão no `.env.example`).
+
+Alternativa com Compose (mesmo bind local):
+
+```bash
+docker compose -f docker-compose.flaresolverr.yml up -d
 ```
 
 ### Instalar o PM2
@@ -250,7 +269,7 @@ graph TD
         FS["flaresolverr.js"]
     end
 
-    Flare["FlareSolverr :8191"]
+    Flare["FlareSolverr 127.0.0.1:8191"]
     DD["downdetector.com.br"]
     D1[("Cloudflare D1 — opcional")]
     Teams["Teams via Power Automate — opcional"]
@@ -281,6 +300,7 @@ Fluxo do cron:
 downdetector/
 ├── app.js                 ← servidor HTTP + cron
 ├── ecosystem.config.cjs   ← PM2 (produção, 1 instância)
+├── docker-compose.flaresolverr.yml  ← FlareSolverr só em 127.0.0.1:8191
 ├── src/
 │   ├── flaresolverr.js    ← cliente FlareSolverr
 │   ├── homepage.js        ← parse da homepage
@@ -335,7 +355,7 @@ Log append-only do ciclo de cada incidente.
 | Sintoma | O que checar |
 |---|---|
 | `401 Unauthorized` | `API_TOKEN` no `.env` e no header/`?token=` |
-| `FlareSolverr HTTP` / challenge | Container no ar em `:8191`; `FLARESOLVERR_URL` |
+| `FlareSolverr HTTP` / challenge | Container no ar só em `127.0.0.1:8191`; `FLARESOLVERR_URL` localhost |
 | Dados “atrasados” no summary | Cron de 15 min ou `?refresh=1` |
 | D1 / notify com erro | Credenciais opcionais vazias — a coleta da API continua funcionando |
 | PM2 cai após reboot | Rodar `pm2 save` e `pm2 startup` (e o comando sudo sugerido) |
