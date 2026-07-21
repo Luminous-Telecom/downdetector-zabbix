@@ -1,0 +1,25 @@
+{
+  "name": "downdetector-th-scraper",
+  "version": "1.0.0",
+  "description": "Puppeteer-based scraper for downdetector.com.br — stealth-hardened, Cloudflare-resilient",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node app.js"
+  },
+  "keywords": [
+    "puppeteer",
+    "scraper",
+    "downdetector"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1086.0",
+    "dotenv": "^16.6.1",
+    "jsdom": "^22.1.0",
+    "puppeteer": "^20.9.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
