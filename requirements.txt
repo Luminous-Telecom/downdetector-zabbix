@@ -1,7 +1,3 @@
 beautifulsoup4>=4.12.0
-cloudscraper>=1.2.71
 requests>=2.31.0
 lxml>=5.0.0
-
-# Opcional: tentativa extra antes do FlareSolverr
-# curl_cffi>=0.7.0

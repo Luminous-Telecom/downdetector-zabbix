@@ -1,28 +1,37 @@
 zabbix_export:
   version: "7.0"
   template_groups:
-    - uuid: 43cadd75fa48481aa11d0139b63b8e02
+    - uuid: f3e43ff3fddb45f7b3b1ab531eb93933
       name: downdetector
   templates:
-    - uuid: 2b878aba6828435fabf8080789ecd43d
+    - uuid: 531604a0bba14a92a3ac6615d70fb310
       template: downdetector
       name: downdetector
       groups:
         - name: downdetector
-      description: "Um host Zabbix = um serviço do Downdetector.\n\nHost name (técnico) = slug:\n  whatsapp → /fora-do-ar/whatsapp/\n\nItem External check: downdetector[{HOST.HOST}]\n(sem Zabbix Agent). Timer atualiza o cache via API.\n\nCódigos: 1=ok, 2=warning, 3=danger, 0=unknown."
+      description: |
+        Um host Zabbix = um serviço Downdetector.
+
+        Host name (técnico) = slug da URL:
+          whatsapp → https://downdetector.com.br/fora-do-ar/whatsapp/
+
+        Agent: downdetector.status[{HOST.HOST}] (lê cache local, ms).
+        Interface Agent = IP do servidor coletor (FlareSolverr + script).
+
+        Códigos: 1=ok, 2=warning, 3=danger, 0=unknown.
       items:
-        - uuid: d93a572038bd45aa93a62a3de92da1d6
+        - uuid: 6b41e1f297444be993e29dcdfc589853
           name: "Downdetector: raw"
-          type: EXTERNAL
-          key: "downdetector[{HOST.HOST}]"
+          type: ZABBIX_PASSIVE
+          key: "downdetector.status[{HOST.HOST}]"
           delay: 5m
           history: 7d
           value_type: TEXT
-          description: "JSON via External check (script no servidor). Slug = Host name."
+          description: "JSON do cache local (atualizado pelo timer)."
           tags:
             - tag: component
               value: raw
-        - uuid: 961de8b5df5c43049659f372a8f274f4
+        - uuid: 28360498e00d4006a6b89a514026b07b
           name: "Downdetector: status code"
           type: DEPENDENT
           key: downdetector.status.code
@@ -36,20 +45,20 @@ zabbix_export:
                 - $.status_code
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector[{HOST.HOST}]"
+            key: "downdetector.status[{HOST.HOST}]"
           tags:
             - tag: component
               value: status
           triggers:
-            - uuid: 6e0551f655ff4406bcfa0e3be160ef42
+            - uuid: 2465ede9d8f5454a9b48edae20c95167
               expression: "last(/downdetector/downdetector.status.code)=3"
               name: "Downdetector: {HOST.NAME} reporta problemas"
               priority: HIGH
-            - uuid: ff443911b0fc44939b2bc25e8ece513d
+            - uuid: 87d51f51c8b74d43aee83fe6142fd67f
               expression: "last(/downdetector/downdetector.status.code)=2"
               name: "Downdetector: {HOST.NAME} reporta possíveis problemas"
               priority: WARNING
-        - uuid: f0d7120c5c654977914b33bc16a99012
+        - uuid: 0af37cf18d71411ebcc57b97edf28205
           name: "Downdetector: status"
           type: DEPENDENT
           key: downdetector.status.text
@@ -61,11 +70,8 @@ zabbix_export:
                 - $.status
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector[{HOST.HOST}]"
-          tags:
-            - tag: component
-              value: status
-        - uuid: 3eee3b710b41471daede7e7f30484153
+            key: "downdetector.status[{HOST.HOST}]"
+        - uuid: 1bd6a3405c2445ed850c2f5d698e352c
           name: "Downdetector: relatos"
           type: DEPENDENT
           key: downdetector.reports
@@ -78,11 +84,8 @@ zabbix_export:
                 - $.reports
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector[{HOST.HOST}]"
-          tags:
-            - tag: component
-              value: reports
-        - uuid: 70c64a37549c4583a1f2affd77b4dd91
+            key: "downdetector.status[{HOST.HOST}]"
+        - uuid: f4d4501e79984418915346fcc7d932e1
           name: "Downdetector: baseline"
           type: DEPENDENT
           key: downdetector.reports.baseline
@@ -95,11 +98,8 @@ zabbix_export:
                 - $.reports_baseline
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector[{HOST.HOST}]"
-          tags:
-            - tag: component
-              value: reports
-        - uuid: 9dbf476ae7c448109b05e6a235dbd09d
+            key: "downdetector.status[{HOST.HOST}]"
+        - uuid: 07e9ea232c1f485984bf698b6fb4942c
           name: "Downdetector: nome"
           type: DEPENDENT
           key: downdetector.name
@@ -111,11 +111,8 @@ zabbix_export:
                 - $.name
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector[{HOST.HOST}]"
-          tags:
-            - tag: component
-              value: meta
-        - uuid: ce821575b32f4692acc0ddb8894b72c2
+            key: "downdetector.status[{HOST.HOST}]"
+        - uuid: 60ae56cbf0ff43cca290520a92aa465c
           name: "Downdetector: logo"
           type: DEPENDENT
           key: downdetector.logo
@@ -127,7 +124,4 @@ zabbix_export:
                 - $.logo
               error_handler: DISCARD_VALUE
           master_item:
-            key: "downdetector[{HOST.HOST}]"
-          tags:
-            - tag: component
-              value: meta
+            key: "downdetector.status[{HOST.HOST}]"

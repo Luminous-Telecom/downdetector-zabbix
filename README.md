@@ -1,45 +1,37 @@
-# Downdetector BR → Zabbix 7.0
+# Downdetector BR → Zabbix Agent (rápido)
 
-**Sem Zabbix Agent.** Cadastro só na web.  
-Cada host dispara um **External check** a cada 5 min; o Server roda o script.
+**Agent responde em ms** (só lê cache).  
+**Hosts manuais** no Zabbix (um por serviço).  
+**Timer** atualiza o cache via FlareSolverr a cada 5 min.
 
 ```
-Zabbix web: host "caixa" + template downdetector
-        │
-        │  External check a cada 5m: downdetector[caixa]
+Host name: whatsapp   Visible: WhatsApp
+Host name: caixa      Visible: Caixa Econômica
+        │  Agent → IP do coletor :10050
         ▼
-Zabbix Server ──► /usr/lib/zabbix/externalscripts/downdetector
-                └─► lê /var/cache/.../caixa.json  (ms)
+Agent: downdetector.status[{HOST.HOST}]  →  lê /var/cache/.../slug.json  (ms)
 
-Timer ──API──► hosts do template ──► FlareSolverr (**N em paralelo**) ──► cache/
+Timer (5 min) → API Zabbix (lista hosts) → FlareSolverr (2x paralelo) → cache
 ```
 
-## 1. Coletor / Server (mesmo servidor)
+## 1. Coletor
 
 ```bash
-cd /opt/downdetector-zabbix
-git pull
+cd /opt/downdetector-zabbix   # ou clone/copie o projeto aqui
 pip install -r requirements.txt --break-system-packages
 docker compose up -d
 
 mkdir -p /var/cache/downdetector-zabbix
 chown -R zabbix:zabbix /var/cache/downdetector-zabbix
 
-# Script do External check (path padrão Debian/Ubuntu)
-cp zabbix/externalscripts/downdetector /usr/lib/zabbix/externalscripts/downdetector
-chmod 755 /usr/lib/zabbix/externalscripts/downdetector
-# confira: grep ^ExternalScripts /etc/zabbix/zabbix_server.conf
+# Timeout=30 no /etc/zabbix/zabbix_agentd.conf
+cp zabbix/downdetector.conf /etc/zabbix/zabbix_agentd.d/downdetector.conf
+systemctl restart zabbix-agent
 ```
 
-Teste manual:
+## 2. API token (timer descobre os hosts sozinho)
 
-```bash
-/usr/lib/zabbix/externalscripts/downdetector whatsapp
-```
-
-## 2. API token (timer descobre os hosts)
-
-**Users → API tokens → Create**
+No Zabbix: **Users → API tokens → Create**
 
 ```bash
 cp zabbix/downdetector-api.env.example /etc/zabbix/downdetector-api.env
@@ -56,21 +48,39 @@ journalctl -u downdetector-refresh.service -f
 
 ## 3. Template + hosts (só na web)
 
-Importe de novo: `zabbix/template_downdetector_br.yaml`  
-(item mestre = **External check** `downdetector[{HOST.HOST}]`).
+Importe `zabbix/template_downdetector_br.yaml`.
 
-| Campo | Valor |
+Para cada serviço:
+
+| Campo | Exemplo |
 |---|---|
-| Host name | slug (`caixa`, `whatsapp`, `banco-inter`) |
-| Visible name | Caixa Econômica Federal, etc. |
-| Interfaces | pode ser Agent `127.0.0.1` (não precisa agent rodando) |
+| Host name | `whatsapp` / `caixa` / `banco-inter` |
+| Visible name | WhatsApp / Caixa Econômica Federal |
+| Agent | IP do coletor, porta **10050** |
 | Templates | `downdetector` |
 
-Não precisa UserParameter / agent. O ZBX pode ficar cinza — o que importa é o item External.
+Slug = URL: `https://downdetector.com.br/fora-do-ar/<Host name>/`
+
+Teste no coletor:
+
+```bash
+zabbix_agentd -t "downdetector.status[whatsapp]"
+# deve retornar JSON em <1s (depois do 1º refresh)
+```
+
+## Por que é rápido
+
+| Parte | Tempo |
+|---|---|
+| Agent (Zabbix) | ~ms — só lê arquivo |
+| Timer (background) | ~1–3 min para ~40 hosts (2 Chromes) |
+
+Não rode FlareSolverr dentro do agent: Timeout máximo do agentd é **30s** e o Cloudflare costuma passar disso.
 
 ## Troubleshooting
 
-- **Unsupported item key / empty**: script não está em `ExternalScripts` ou sem `chmod +x`
-- **cache ausente**: rode `systemctl start downdetector-refresh.service`
+- **cache ausente**: `systemctl start downdetector-refresh.service`
+- **Permission denied** no cache: `chown -R zabbix:zabbix /var/cache/downdetector-zabbix`
 - **Session terminated** na API: token/URL em `/etc/zabbix/downdetector-api.env`
-- **Timeout no External**: Timeout do Server ≥ 10s (leitura de cache é rápida)
+- **CPU alta no refresh**: baixe `--workers 1` no unit systemd
+- **Timeout=60 rejeitado**: agentd clássico aceita no máximo **30**

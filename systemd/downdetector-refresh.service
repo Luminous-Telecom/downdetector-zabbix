@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh Downdetector BR cache (parallel FlareSolverr)
+Description=Refresh Downdetector BR cache via FlareSolverr
 After=network-online.target docker.service
 Wants=network-online.target
 
@@ -9,7 +9,7 @@ User=zabbix
 Group=zabbix
 Nice=10
 EnvironmentFile=-/etc/zabbix/downdetector-api.env
-# 4 sessões FlareSolverr em paralelo (ajuste DOWNDETECTOR_WORKERS se quiser)
-Environment=DOWNDETECTOR_WORKERS=4
-ExecStart=/usr/bin/python3 /opt/downdetector-zabbix/downdetector_scraper.py --refresh-all --workers 4 --delay 0
+# 2 workers = bom equilíbrio velocidade/CPU (suba para 3–4 se a máquina aguentar)
+Environment=DOWNDETECTOR_WORKERS=2
+ExecStart=/usr/bin/python3 /opt/downdetector-zabbix/downdetector_scraper.py --refresh-all --workers 2
 TimeoutStartSec=7200

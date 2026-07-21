@@ -1,10 +1,10 @@
 [Unit]
-Description=Refresh Downdetector BR cache every 5 minutes
+Description=Refresh Downdetector cache every 5 minutes
 
 [Timer]
-OnBootSec=2min
+OnBootSec=1min
 OnUnitActiveSec=5min
-AccuracySec=1min
+AccuracySec=30s
 Persistent=true
 Unit=downdetector-refresh.service
 
