@@ -50,6 +50,8 @@ function getClient() {
 // Config validation
 // ---------------------------------------------------------------------------
 
+let _r2ConfigLogged = false;
+
 function r2Configured() {
   const required = [
     'R2_ACCESS_KEY_ID',
@@ -58,11 +60,12 @@ function r2Configured() {
     'R2_ENDPOINT',
     'R2_PUBLIC_BASE_URL',
   ];
-  const missing = required.filter((k) => !process.env[k]);
+  const missing = required.filter((k) => !process.env[k] || !String(process.env[k]).trim());
   if (missing.length > 0) {
-    console.warn(
-      `[R2Uploader] Missing env vars: ${missing.join(', ')} — skipping R2 upload`,
-    );
+    if (!_r2ConfigLogged) {
+      console.log('[R2] Desabilitado (sem credenciais) — OK');
+      _r2ConfigLogged = true;
+    }
     return false;
   }
   return true;
