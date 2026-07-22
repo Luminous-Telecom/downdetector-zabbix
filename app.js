@@ -185,6 +185,9 @@ async function handleSummary(res, query = {}) {
   if (!forceRefresh) {
     const cached = cache.get('homepage');
     if (cached) {
+      console.log(
+        `[HTTP] /api/summary cache HIT — ${cached.totalServicesListed} services, fetchedAt ${cached.fetchedAt}`
+      );
       return sendJSON(res, 200, cached);
     }
   } else {
@@ -197,6 +200,9 @@ async function handleSummary(res, query = {}) {
   }
   const data = await scrapeHomepage();
   cache.set('homepage', data, CACHE_TTL_MS);
+  console.log(
+    `[HTTP] /api/summary scraped OK — ${data.totalServicesListed} services, fetchedAt ${data.fetchedAt}`
+  );
   sendJSON(res, 200, data);
 }
 
@@ -212,6 +218,9 @@ async function handleService(res, slug, query = {}) {
     () => scrapeService(slug.toLowerCase()),
     SERVICE_CACHE_TTL_MS,
     forceRefresh
+  );
+  console.log(
+    `[HTTP] /api/service/${slug.toLowerCase()} OK — status=${data.status}, reports=${data.reports}, fetchedAt ${data.fetchedAt}`
   );
   sendJSON(res, 200, data);
 }
