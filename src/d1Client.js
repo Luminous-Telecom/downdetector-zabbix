@@ -28,9 +28,14 @@
  *   NOT_FOUND  — resolved, service disappeared from scrape while alert was open
  */
 
-const ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
-const API_TOKEN  = process.env.CLOUDFLARE_API_TOKEN;
-const DB_ID      = process.env.D1_DATABASE_ID || 'a4696e2f-3e65-40b1-a168-5fd957e593ad';
+const ACCOUNT_ID = (process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+const API_TOKEN = (process.env.CLOUDFLARE_API_TOKEN || '').trim();
+const DB_ID = process.env.D1_DATABASE_ID || 'a4696e2f-3e65-40b1-a168-5fd957e593ad';
+
+/** D1 é opcional — sem credenciais a API continua só com cache/HTTP. */
+function isD1Configured() {
+  return Boolean(ACCOUNT_ID && API_TOKEN);
+}
 
 function getD1Url() {
   return `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/d1/database/${DB_ID}/query`;
@@ -43,7 +48,7 @@ function getD1Url() {
  * @returns {Promise<Array>} rows from result[0].results
  */
 async function queryD1(sql, params = []) {
-  if (!ACCOUNT_ID || !API_TOKEN) {
+  if (!isD1Configured()) {
     throw new Error('[D1] CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN not set');
   }
 
@@ -96,6 +101,11 @@ async function queryD1(sql, params = []) {
  * Called once on server startup.
  */
 async function initD1() {
+  if (!isD1Configured()) {
+    console.log('[D1] Desabilitado (sem CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN) — OK');
+    return;
+  }
+
   // summaries — unchanged
   await queryD1(`
     CREATE TABLE IF NOT EXISTS summaries (
@@ -148,6 +158,7 @@ async function initD1() {
  * @returns {Promise<Object|null>}
  */
 async function getLastSummary() {
+  if (!isD1Configured()) return null;
   const rows = await queryD1(
     'SELECT data FROM summaries ORDER BY id DESC LIMIT 1'
   );
@@ -164,6 +175,7 @@ async function getLastSummary() {
  * @param {Object} summaryData — the full homepage summary JSON
  */
 async function insertSummary(summaryData) {
+  if (!isD1Configured()) return;
   await queryD1(
     'INSERT INTO summaries (fetched_at, data) VALUES (?, ?)',
     [summaryData.fetchedAt, JSON.stringify(summaryData)]
@@ -181,6 +193,7 @@ async function insertSummary(summaryData) {
  * @returns {Promise<Map<string, {slug, name, status, round, startTime}>>}
  */
 async function getActiveAlerts() {
+  if (!isD1Configured()) return new Map();
   const rows = await queryD1(
     `SELECT slug, service, status, round, start_time
      FROM alerts
@@ -215,6 +228,7 @@ async function getActiveAlerts() {
  * @param {string} startTime — ISO 8601 string
  */
 async function upsertNewAlert(slug, service, status, startTime) {
+  if (!isD1Configured()) return;
   // Upsert alerts row (insert if new, replace/reset if existing CLEAR row)
   await queryD1(
     `INSERT INTO alerts (slug, service, status, round, start_time, updated_at)
@@ -245,6 +259,7 @@ async function upsertNewAlert(slug, service, status, startTime) {
  * @param {string} updatedAt — ISO 8601 string (now)
  */
 async function incrementAlertRound(slug, status, updatedAt) {
+  if (!isD1Configured()) return;
   // Update alerts live state
   await queryD1(
     `UPDATE alerts
@@ -279,6 +294,7 @@ async function incrementAlertRound(slug, status, updatedAt) {
  * @param {string} [status='CLEAR'] — closing status: 'CLEAR' or 'NOT_FOUND'
  */
 async function resolveAlert(slug, endTime, status = 'CLEAR') {
+  if (!isD1Configured()) return;
   // Read the current round from the live alerts row
   const rows = await queryD1(
     'SELECT round FROM alerts WHERE slug = ?',
@@ -327,6 +343,7 @@ async function resolveAlert(slug, endTime, status = 'CLEAR') {
  * @returns {Promise<Array>}
  */
 async function getAlerts({ service, status, from, to, limit = 50 } = {}) {
+  if (!isD1Configured()) return [];
   const conditions = [];
   const params     = [];
 
@@ -361,6 +378,7 @@ async function getAlerts({ service, status, from, to, limit = 50 } = {}) {
 }
 
 module.exports = {
+  isD1Configured,
   initD1,
   getLastSummary,
   insertSummary,

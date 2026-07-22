@@ -109,10 +109,7 @@ async function sendTeamsNotification(result, screenshotUrls = new Map()) {
   const webhookUrl = process.env.POWER_AUTOMATE_WEBHOOK_URL;
 
   if (!webhookUrl) {
-    console.warn(
-      "[Notifier] POWER_AUTOMATE_WEBHOOK_URL not set — skipping Teams notification",
-    );
-    return;
+    return; // opcional — sem webhook, silencioso
   }
 
   // Only send notification if there are warning/critical incidents OR resolved ones

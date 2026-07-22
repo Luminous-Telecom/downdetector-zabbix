@@ -65,12 +65,22 @@ function parseHomepageHtml(html) {
       rawStatus = m ? m[1].trim() : null;
     }
 
+    let logo = null;
+    const logoImg = card.querySelector('img[src*="logo"], img[src*="static/uploads"]');
+    if (logoImg) {
+      const src = logoImg.getAttribute('src') || '';
+      // Prefer the original CDN logo URL when wrapped by cdn-cgi/image
+      const nested = src.match(/https?:\/\/cdn\d*\.downdetector\.com\/static\/uploads\/logo\/[^?\s]+/i);
+      logo = nested ? nested[0] : src || null;
+    }
+
     services.push({
       companyId,
       name,
       slug,
       status: normalizeStatus(rawStatus),
       rawStatus,
+      logo,
     });
   });
 

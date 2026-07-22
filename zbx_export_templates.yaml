@@ -1,0 +1,380 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 43cadd75fa48481aa11d0139b63b8e02
+      name: downdetector
+  templates:
+    - uuid: 2b878aba6828435fabf8080789ecd43d
+      template: downdetector
+      name: downdetector
+      description: |
+        Um host: downdetector-api
+
+        1x HTTP /api/summary (leve). Discovery só cria itens DEPENDENTES
+        (status, name, rawStatus) — NÃO chama FlareSolverr por serviço.
+
+        No Grafana filtre:
+          Application = downdetector
+          service = alares-internet
+        Os VALORES dos itens são status / name / rawStatus.
+      groups:
+        - name: downdetector
+      tags:
+        - tag: Application
+          value: downdetector
+        - tag: source
+          value: summary
+        - tag: grafana
+          value: '1'
+      items:
+        - uuid: d93a572038bd45aa93a62a3de92da1d6
+          name: 'Downdetector: summary raw'
+          type: HTTP_AGENT
+          key: downdetector.summary.raw
+          delay: '{$DD_INTERVAL}'
+          history: 7d
+          value_type: TEXT
+          trends: '0'
+          timeout: 90s
+          description: 'Única chamada HTTP — GET /api/summary?refresh={$DD_REFRESH}'
+          tags:
+            - tag: Application
+              value: downdetector
+            - tag: component
+              value: summary
+            - tag: grafana
+              value: '1'
+          triggers:
+            - uuid: cf28c101174647f48974b6415f76bdf1
+              expression: 'nodata(/downdetector/downdetector.summary.raw,30m)=1'
+              name: 'Downdetector: summary sem dados há 30m'
+              priority: WARNING
+              tags:
+                - tag: Application
+                  value: downdetector
+                - tag: component
+                  value: summary
+                - tag: grafana
+                  value: '1'
+          url: '{$DD_API_URL}/api/summary?refresh={$DD_REFRESH}'
+          status_codes: '200'
+          follow_redirects: 'YES'
+          retrieve_mode: BODY
+          request_method: GET
+          output_format: RAW
+          headers:
+            - name: Authorization
+              value: 'Bearer {$DD_API_TOKEN}'
+        - uuid: 89f1f559109c4a4a9614f941b28a5564
+          name: 'Downdetector: fetchedAt'
+          type: DEPENDENT
+          key: downdetector.summary.fetchedAt
+          delay: '0'
+          history: 7d
+          value_type: CHAR
+          trends: '0'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.fetchedAt
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: downdetector.summary.raw
+          tags:
+            - tag: Application
+              value: downdetector
+            - tag: component
+              value: meta
+            - tag: grafana
+              value: '1'
+        - uuid: ed530820098345ce8e8655f2d0283e7b
+          name: 'Downdetector: total services'
+          type: DEPENDENT
+          key: downdetector.summary.total
+          delay: '0'
+          history: 90d
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.totalServicesListed
+              error_handler: DISCARD_VALUE
+          master_item:
+            key: downdetector.summary.raw
+          tags:
+            - tag: Application
+              value: downdetector
+            - tag: component
+              value: meta
+            - tag: grafana
+              value: '1'
+      discovery_rules:
+        - uuid: d92dbe3fd3174b49aaa6c4f38f2fa33f
+          name: 'Downdetector: services discovery'
+          type: DEPENDENT
+          key: downdetector.service.discovery
+          delay: '0'
+          lifetime: 2d
+          description: 'LLD leve — só lê o JSON do summary (sem HTTP extra)'
+          master_item:
+            key: downdetector.summary.raw
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value);
+                  var services = data.services || [];
+                  var lld = [];
+                  for (var i = 0; i < services.length; i++) {
+                    var s = services[i];
+                    if (!s || !s.slug) continue;
+                    lld.push({
+                      '{#SLUG}': String(s.slug),
+                      '{#NAME}': String(s.name || s.slug),
+                      '{#COMPANYID}': String(s.companyId || '')
+                    });
+                  }
+                  return JSON.stringify(lld);
+          item_prototypes:
+            - uuid: 66caa063da0845429ee2c3bb33633d8e
+              name: 'Downdetector: {#NAME} status'
+              type: DEPENDENT
+              key: 'downdetector.status[{#SLUG}]'
+              delay: '0'
+              history: 90d
+              value_type: CHAR
+              trends: '0'
+              description: 'Valor = OK | WARNING | DOWN'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value);
+                      var slug = '{#SLUG}';
+                      var services = data.services || [];
+                      for (var i = 0; i < services.length; i++) {
+                        if (services[i].slug === slug) {
+                          return String(services[i].status || 'UNKNOWN');
+                        }
+                      }
+                      return 'UNKNOWN';
+              master_item:
+                key: downdetector.summary.raw
+              tags:
+                - tag: Application
+                  value: downdetector
+                - tag: service
+                  value: '{#SLUG}'
+                - tag: name
+                  value: '{#NAME}'
+                - tag: component
+                  value: status
+                - tag: grafana
+                  value: '1'
+            - uuid: b831aeb87c914ea1a576d7e049024dd4
+              name: 'Downdetector: {#NAME} rawStatus'
+              type: DEPENDENT
+              key: 'downdetector.rawStatus[{#SLUG}]'
+              delay: '0'
+              history: 7d
+              value_type: CHAR
+              trends: '0'
+              description: 'Valor = texto do site, ex. Possíveis problemas'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value);
+                      var slug = '{#SLUG}';
+                      var services = data.services || [];
+                      for (var i = 0; i < services.length; i++) {
+                        if (services[i].slug === slug) {
+                          return String(services[i].rawStatus || '');
+                        }
+                      }
+                      return '';
+              master_item:
+                key: downdetector.summary.raw
+              tags:
+                - tag: Application
+                  value: downdetector
+                - tag: service
+                  value: '{#SLUG}'
+                - tag: name
+                  value: '{#NAME}'
+                - tag: component
+                  value: rawStatus
+                - tag: grafana
+                  value: '1'
+            - uuid: 5df6633ec910464f8f8a61625c5f1c37
+              name: 'Downdetector: {#NAME} name'
+              type: DEPENDENT
+              key: 'downdetector.name[{#SLUG}]'
+              delay: '0'
+              history: 7d
+              value_type: CHAR
+              trends: '0'
+              description: 'Valor = nome do serviço'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value);
+                      var slug = '{#SLUG}';
+                      var services = data.services || [];
+                      for (var i = 0; i < services.length; i++) {
+                        if (services[i].slug === slug) {
+                          return String(services[i].name || slug);
+                        }
+                      }
+                      return slug;
+              master_item:
+                key: downdetector.summary.raw
+              tags:
+                - tag: Application
+                  value: downdetector
+                - tag: service
+                  value: '{#SLUG}'
+                - tag: name
+                  value: '{#NAME}'
+                - tag: component
+                  value: name
+                - tag: grafana
+                  value: '1'
+            - uuid: e0e1942f87c040cb8299b21186bef300
+              name: 'Downdetector: {#NAME} logo'
+              type: DEPENDENT
+              key: 'downdetector.logo[{#SLUG}]'
+              delay: '0'
+              history: 7d
+              value_type: TEXT
+              trends: '0'
+              description: 'URL da logo do serviço'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value);
+                      var slug = '{#SLUG}';
+                      var services = data.services || [];
+                      for (var i = 0; i < services.length; i++) {
+                        if (services[i].slug === slug) {
+                          return String(services[i].logo || '');
+                        }
+                      }
+                      return '';
+              master_item:
+                key: downdetector.summary.raw
+              tags:
+                - tag: Application
+                  value: downdetector
+                - tag: service
+                  value: '{#SLUG}'
+                - tag: name
+                  value: '{#NAME}'
+                - tag: component
+                  value: logo
+                - tag: grafana
+                  value: '1'
+            - uuid: db5b7c2da0464f5eb6b150b3c6ed8540
+              name: 'Downdetector: {#NAME} status code'
+              type: DEPENDENT
+              key: 'downdetector.status.code[{#SLUG}]'
+              delay: '0'
+              history: 90d
+              description: '1=OK 2=WARNING 3=DOWN 0=unknown — para trigger/gráfico'
+              valuemap:
+                name: 'Downdetector status'
+              preprocessing:
+                - type: JAVASCRIPT
+                  parameters:
+                    - |
+                      var data = JSON.parse(value);
+                      var slug = '{#SLUG}';
+                      var status = 'UNKNOWN';
+                      var services = data.services || [];
+                      for (var i = 0; i < services.length; i++) {
+                        if (services[i].slug === slug) {
+                          status = String(services[i].status || 'UNKNOWN');
+                          break;
+                        }
+                      }
+                      if (status === 'OK') return 1;
+                      if (status === 'WARNING') return 2;
+                      if (status === 'DOWN') return 3;
+                      return 0;
+              master_item:
+                key: downdetector.summary.raw
+              tags:
+                - tag: Application
+                  value: downdetector
+                - tag: service
+                  value: '{#SLUG}'
+                - tag: name
+                  value: '{#NAME}'
+                - tag: component
+                  value: status_code
+                - tag: grafana
+                  value: '1'
+              trigger_prototypes:
+                - uuid: 01a810ac97664421a7c8bd235d9e8a74
+                  expression: 'last(/downdetector/downdetector.status.code[{#SLUG}])=2'
+                  name: 'Downdetector: {#NAME} reporta possíveis problemas'
+                  priority: WARNING
+                  tags:
+                    - tag: Application
+                      value: downdetector
+                    - tag: service
+                      value: '{#SLUG}'
+                    - tag: name
+                      value: '{#NAME}'
+                    - tag: grafana
+                      value: '1'
+                - uuid: 6324b1da485c4856a5d0a2c0a9f93a2a
+                  expression: 'last(/downdetector/downdetector.status.code[{#SLUG}])=3'
+                  name: 'Downdetector: {#NAME} reporta problemas'
+                  priority: HIGH
+                  tags:
+                    - tag: Application
+                      value: downdetector
+                    - tag: service
+                      value: '{#SLUG}'
+                    - tag: name
+                      value: '{#NAME}'
+                    - tag: grafana
+                      value: '1'
+          graph_prototypes:
+            - uuid: 7310ce0e3c34425ba57f79f2eeddeb80
+              name: 'Downdetector: {#NAME} status code'
+              width: '900'
+              height: '200'
+              graph_items:
+                - sortorder: '0'
+                  color: '199C0D'
+                  item:
+                    host: downdetector
+                    key: 'downdetector.status.code[{#SLUG}]'
+      macros:
+        - macro: '{$DD_API_URL}'
+          value: 'http://127.0.0.1:3333'
+          description: 'Base URL da API (sem barra no final)'
+        - macro: '{$DD_API_TOKEN}'
+          value: ''
+          description: 'API_TOKEN do .env'
+        - macro: '{$DD_REFRESH}'
+          value: '1'
+          description: '1 = ?refresh=1; 0 = cache do cron'
+        - macro: '{$DD_INTERVAL}'
+          value: 15m
+          description: 'Intervalo do summary (1 scrape FlareSolverr)'
+      valuemaps:
+        - uuid: ca0421b6cc8d49d1a1594e2e6c882c65
+          name: 'Downdetector status'
+          mappings:
+            - value: '0'
+              newvalue: unknown
+            - value: '1'
+              newvalue: OK
+            - value: '2'
+              newvalue: WARNING
+            - value: '3'
+              newvalue: DOWN

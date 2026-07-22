@@ -121,19 +121,20 @@ async function runSummaryCron() {
 
       await insertSummary(data);
 
-      // Sem browser: notificações sem screenshot de cards
       const screenshotUrls = new Map();
       purgeOldScreenshots(7).catch((purgeErr) => {
         console.warn('[Cron] R2 purge failed (non-fatal):', purgeErr.message);
       });
 
       await sendTeamsNotification(result, screenshotUrls);
-      console.log(
-        `[Cron] Notification sent — active:${result.active.length} resolved:${result.resolved.length}`
-      );
+      if (result.active.length || result.resolved.length) {
+        console.log(
+          `[Cron] Diff — active:${result.active.length} resolved:${result.resolved.length}`
+        );
+      }
     } catch (notifyErr) {
       console.error(
-        '[Cron] Notify error (scrape result still cached):',
+        '[Cron] Notify/D1 error (scrape result still cached):',
         notifyErr.message
       );
     }
